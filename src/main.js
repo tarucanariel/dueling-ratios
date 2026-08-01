@@ -1,0 +1,790 @@
+import './style.css';
+import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
+import { createRoom, joinRoom, listenToRoom, submitRoomUpdate } from './online.js';
+import { ref, remove } from 'firebase/database';
+import { db } from './firebase.js';
+
+/* =========================================================
+   AAT's Dueling Ratios — app logic
+   ========================================================= */
+
+const state = {
+  mode: null,           // 'solo' | 'vs' | 'online'
+  players: [],          // [{name, score}] length 1 or 2
+  currentPlayer: 0,      // index into players
+  totalPairs: 0,
+  pairIndex: 0,
+  problem: null,        // current fraction pair {a,b,op,c,d}
+  cells: [],            // current grid cell definitions
+  cellIndex: 0,         // which cell is currently active
+  pool: [],             // current tile pool [{id, value}]
+  allowedOps: ['+', '-', '\u00D7', '\u00F7'], // operations the player opted into
+  allowNegatives: false, // whether generated numerators can be negative
+  inputLocked: false,   // prevents a single tap from being processed twice
+  timeControlSeconds: 0, // 0 = no timer (local modes only — not yet supported online)
+  timerId: null,         // setInterval handle
+
+  // Online play
+  onlineChoice: null,    // 'create' | 'join'
+  isOnline: false,
+  roomCode: null,
+  myRole: null,          // 'host' | 'guest'
+  unsubscribeRoom: null,
+};
+
+/* ---------- DOM refs ---------- */
+const el = {
+  setupModal: document.getElementById('setup-modal'),
+  player1Name: document.getElementById('player1-name'),
+  player2Name: document.getElementById('player2-name'),
+  stepName2: document.getElementById('step-name2'),
+  modeSolo: document.getElementById('mode-solo'),
+  modeVs: document.getElementById('mode-vs'),
+  modeOnline: document.getElementById('mode-online'),
+  startBtn: document.getElementById('start-game-btn'),
+  setupError: document.getElementById('setup-error'),
+
+  opAll: document.getElementById('op-all'),
+  opChoices: document.querySelectorAll('.op-choice'),
+  pairCountSelect: document.getElementById('pair-count-select'),
+  timeControlSelect: document.getElementById('time-control-select'),
+  timeControlNote: document.getElementById('time-control-note'),
+  allowNegatives: document.getElementById('allow-negatives'),
+
+  stepOperations: document.getElementById('step-operations'),
+  stepNegatives: document.getElementById('step-negatives'),
+  stepPairCount: document.getElementById('step-pair-count'),
+  stepTimeControl: document.getElementById('step-time-control'),
+
+  stepOnlineChoice: document.getElementById('step-online-choice'),
+  onlineCreateBtn: document.getElementById('online-create-btn'),
+  onlineJoinBtn: document.getElementById('online-join-btn'),
+  stepJoinCode: document.getElementById('step-join-code'),
+  joinCodeInput: document.getElementById('join-code-input'),
+
+  waitingModal: document.getElementById('waiting-modal'),
+  roomCodeDisplay: document.getElementById('room-code-display'),
+  cancelWaitingBtn: document.getElementById('cancel-waiting-btn'),
+
+  gameScreen: document.getElementById('game-screen'),
+  chipP1: document.getElementById('chip-p1'),
+  chipP2: document.getElementById('chip-p2'),
+  chipP1Name: document.getElementById('chip-p1-name'),
+  chipP2Name: document.getElementById('chip-p2-name'),
+  chipP1Score: document.getElementById('chip-p1-score'),
+  chipP2Score: document.getElementById('chip-p2-score'),
+  chipP1Timer: document.getElementById('chip-p1-timer'),
+  chipP2Timer: document.getElementById('chip-p2-timer'),
+  pairCounter: document.getElementById('pair-counter'),
+  turnFlag: document.getElementById('turn-flag'),
+
+  problemStrip: document.getElementById('problem-strip'),
+  poolTray: document.getElementById('pool-tray'),
+  feedbackLine: document.getElementById('feedback-line'),
+
+  winnerModal: document.getElementById('winner-modal'),
+  winnerHeading: document.getElementById('winner-heading'),
+  winnerDetail: document.getElementById('winner-detail'),
+  playAgainBtn: document.getElementById('play-again-btn'),
+};
+
+/* =========================================================
+   Setup screen wiring
+   ========================================================= */
+
+el.modeSolo.addEventListener('click', () => selectMode('solo'));
+el.modeVs.addEventListener('click', () => selectMode('vs'));
+el.modeOnline.addEventListener('click', () => selectMode('online'));
+el.startBtn.addEventListener('click', handlePrimaryButtonClick);
+el.playAgainBtn.addEventListener('click', resetToSetup);
+el.cancelWaitingBtn.addEventListener('click', cancelWaiting);
+
+el.onlineCreateBtn.addEventListener('click', () => selectOnlineChoice('create'));
+el.onlineJoinBtn.addEventListener('click', () => selectOnlineChoice('join'));
+
+updateStepVisibility(); // initial state: nothing mode-dependent shown until a mode is picked
+
+el.opAll.addEventListener('change', () => {
+  el.opChoices.forEach(cb => { cb.checked = el.opAll.checked; });
+});
+el.opChoices.forEach(cb => {
+  cb.addEventListener('change', () => {
+    el.opAll.checked = Array.from(el.opChoices).every(c => c.checked);
+  });
+});
+
+function selectMode(mode){
+  state.mode = mode;
+  state.onlineChoice = null;
+  el.modeSolo.classList.toggle('selected', mode === 'solo');
+  el.modeVs.classList.toggle('selected', mode === 'vs');
+  el.modeOnline.classList.toggle('selected', mode === 'online');
+  el.onlineCreateBtn.classList.remove('selected');
+  el.onlineJoinBtn.classList.remove('selected');
+  el.setupError.textContent = '';
+  updateStepVisibility();
+}
+
+function selectOnlineChoice(choice){
+  state.onlineChoice = choice;
+  el.onlineCreateBtn.classList.toggle('selected', choice === 'create');
+  el.onlineJoinBtn.classList.toggle('selected', choice === 'join');
+  el.setupError.textContent = '';
+  updateStepVisibility();
+}
+
+/* Central place that decides which setup fields are visible, based on
+   the chosen mode (and, for online, whether creating or joining). */
+function updateStepVisibility(){
+  const { mode, onlineChoice } = state;
+
+  el.stepName2.classList.toggle('hidden', mode !== 'vs');
+  el.stepOnlineChoice.classList.toggle('hidden', mode !== 'online');
+  el.stepJoinCode.classList.toggle('hidden', !(mode === 'online' && onlineChoice === 'join'));
+
+  // Operations/pair-count/negatives: local modes always show them;
+  // online only shows them once "Create Game" is chosen (the guest
+  // inherits whatever the host picked, so they don't choose anything).
+  const showHostSettings = (mode === 'solo' || mode === 'vs') || (mode === 'online' && onlineChoice === 'create');
+  el.stepOperations.classList.toggle('hidden', !showHostSettings);
+  el.stepNegatives.classList.toggle('hidden', !showHostSettings);
+  el.stepPairCount.classList.toggle('hidden', !showHostSettings);
+
+  // Time control isn't synced across devices yet, so it's local-only for now.
+  el.stepTimeControl.classList.toggle('hidden', mode === 'online');
+
+  // Start button: only appears once we know what it should do.
+  const ready = mode === 'solo' || mode === 'vs' || (mode === 'online' && onlineChoice);
+  el.startBtn.classList.toggle('hidden', !ready);
+  if(mode === 'online'){
+    el.startBtn.textContent = onlineChoice === 'join' ? 'Join Room' : 'Create Room';
+  } else {
+    el.startBtn.textContent = 'Start Game';
+  }
+}
+
+function handlePrimaryButtonClick(){
+  if(state.mode === 'online'){
+    if(state.onlineChoice === 'create') handleCreateGame();
+    else if(state.onlineChoice === 'join') handleJoinGame();
+    return;
+  }
+  tryStartGame();
+}
+
+function tryStartGame(){
+  const name1 = el.player1Name.value.trim();
+  const name2 = el.player2Name.value.trim();
+
+  if(!name1){
+    el.setupError.textContent = 'Please enter your name.';
+    return;
+  }
+  if(!state.mode){
+    el.setupError.textContent = 'Please choose a game mode.';
+    return;
+  }
+  if(state.mode === 'vs' && !name2){
+    el.setupError.textContent = "Please enter your opponent's name.";
+    return;
+  }
+
+  const selectedOps = Array.from(el.opChoices).filter(cb => cb.checked).map(cb => cb.dataset.op);
+  if(selectedOps.length === 0){
+    el.setupError.textContent = 'Please select at least one operation to practice.';
+    return;
+  }
+  state.allowedOps = selectedOps;
+  state.allowNegatives = el.allowNegatives.checked;
+
+  state.timeControlSeconds = parseInt(el.timeControlSelect.value, 10);
+
+  state.players = [{ name: name1, score: 0, timeRemaining: state.timeControlSeconds }];
+  if(state.mode === 'vs'){
+    state.players.push({ name: name2, score: 0, timeRemaining: state.timeControlSeconds });
+    el.chipP2.classList.remove('hidden');
+  } else {
+    el.chipP2.classList.add('hidden');
+  }
+  state.currentPlayer = 0;
+
+  el.chipP1Name.textContent = state.players[0].name;
+  if(state.players[1]) el.chipP2Name.textContent = state.players[1].name;
+
+  const timerOn = state.timeControlSeconds > 0;
+  el.chipP1Timer.classList.toggle('hidden', !timerOn);
+  el.chipP2Timer.classList.toggle('hidden', !timerOn || state.mode !== 'vs');
+
+  state.totalPairs = parseInt(el.pairCountSelect.value, 10);
+  state.pairIndex = 0;
+
+  el.setupModal.classList.add('hidden');
+  el.gameScreen.classList.remove('hidden');
+
+  startNextPair();
+  if(timerOn) startTimer();
+}
+
+function resetToSetup(){
+  stopTimer();
+  leaveOnlineRoom();
+  el.winnerModal.classList.add('hidden');
+  el.waitingModal.classList.add('hidden');
+  el.gameScreen.classList.add('hidden');
+  el.setupModal.classList.remove('hidden');
+  el.setupError.textContent = '';
+  state.mode = null;
+  state.onlineChoice = null;
+  el.modeSolo.classList.remove('selected');
+  el.modeVs.classList.remove('selected');
+  el.modeOnline.classList.remove('selected');
+  el.onlineCreateBtn.classList.remove('selected');
+  el.onlineJoinBtn.classList.remove('selected');
+  el.joinCodeInput.value = '';
+  updateStepVisibility();
+}
+
+/* =========================================================
+   Online play
+   ========================================================= */
+
+function leaveOnlineRoom(){
+  if(state.unsubscribeRoom){
+    state.unsubscribeRoom();
+    state.unsubscribeRoom = null;
+  }
+  state.isOnline = false;
+  state.roomCode = null;
+  state.myRole = null;
+}
+
+async function cancelWaiting(){
+  // Only the host waits, and only before a guest has joined — safe to
+  // delete the room outright rather than leave it lingering in the DB.
+  if(state.roomCode){
+    try { await remove(ref(db, 'rooms/' + state.roomCode)); } catch (e) { /* best-effort cleanup */ }
+  }
+  resetToSetup();
+}
+
+async function handleCreateGame(){
+  const name1 = el.player1Name.value.trim();
+  if(!name1){
+    el.setupError.textContent = 'Please enter your name.';
+    return;
+  }
+  const selectedOps = Array.from(el.opChoices).filter(cb => cb.checked).map(cb => cb.dataset.op);
+  if(selectedOps.length === 0){
+    el.setupError.textContent = 'Please select at least one operation to practice.';
+    return;
+  }
+
+  const settings = {
+    allowedOps: selectedOps,
+    totalPairs: parseInt(el.pairCountSelect.value, 10),
+    allowNegatives: el.allowNegatives.checked,
+  };
+
+  el.startBtn.disabled = true;
+  el.setupError.textContent = '';
+  try{
+    const code = await createRoom(name1, settings);
+    state.isOnline = true;
+    state.roomCode = code;
+    state.myRole = 'host';
+    state.mode = 'online';
+    state.timeControlSeconds = 0;
+
+    el.roomCodeDisplay.textContent = code;
+    el.setupModal.classList.add('hidden');
+    el.waitingModal.classList.remove('hidden');
+
+    state.unsubscribeRoom = listenToRoom(code, onRoomUpdate);
+  } catch (err){
+    el.setupError.textContent = 'Could not create a room. Please try again.';
+    console.error(err);
+  } finally {
+    el.startBtn.disabled = false;
+  }
+}
+
+async function handleJoinGame(){
+  const name1 = el.player1Name.value.trim();
+  const code = el.joinCodeInput.value.trim().toUpperCase();
+  if(!name1){
+    el.setupError.textContent = 'Please enter your name.';
+    return;
+  }
+  if(code.length !== 4){
+    el.setupError.textContent = 'Please enter the 4-character room code.';
+    return;
+  }
+
+  el.startBtn.disabled = true;
+  el.setupError.textContent = '';
+  try{
+    await joinRoom(code, name1);
+    state.isOnline = true;
+    state.roomCode = code;
+    state.myRole = 'guest';
+    state.mode = 'online';
+    state.timeControlSeconds = 0;
+
+    state.unsubscribeRoom = listenToRoom(code, onRoomUpdate);
+  } catch (err){
+    el.setupError.textContent = err.message || 'Could not join that room.';
+  } finally {
+    el.startBtn.disabled = false;
+  }
+}
+
+/* Fires on every change to /rooms/{code} — for BOTH players symmetrically.
+   Rather than each device mutating its own copy of the game state, Firebase
+   is the single source of truth here: every snapshot fully replaces the
+   locally-rendered state, and we just repaint from it. */
+function onRoomUpdate(room){
+  if(!room){
+    // Room was deleted (e.g. host cancelled) — bail back to setup.
+    if(state.isOnline) resetToSetup();
+    return;
+  }
+
+  state.room = room;
+  state.problem = room.problem;
+  state.layout = buildProblemLayout(room.problem);
+  state.cells = state.layout.cells;
+  state.cellIndex = room.cellIndex;
+  state.pool = room.pool || [];
+  state.pairIndex = room.pairIndex;
+  state.totalPairs = room.settings.totalPairs;
+  state.mode = 'vs'; // reuse the existing two-player rendering paths
+
+  const hostP = room.players.host;
+  const guestP = room.players.guest;
+  state.players = guestP
+    ? [{ name: hostP.name, score: hostP.score }, { name: guestP.name, score: guestP.score }]
+    : [{ name: hostP.name, score: hostP.score }];
+  state.currentPlayer = room.turn === 'host' ? 0 : 1;
+
+  if(!guestP){
+    el.roomCodeDisplay.textContent = state.roomCode;
+    el.setupModal.classList.add('hidden');
+    el.gameScreen.classList.add('hidden');
+    el.waitingModal.classList.remove('hidden');
+    return;
+  }
+
+  el.waitingModal.classList.add('hidden');
+
+  const myIdx = state.myRole === 'host' ? 0 : 1;
+  el.chipP1Name.textContent = hostP.name + (state.myRole === 'host' ? ' (You)' : '');
+  el.chipP2Name.textContent = guestP.name + (state.myRole === 'guest' ? ' (You)' : '');
+  el.chipP2.classList.remove('hidden');
+  el.chipP1Timer.classList.add('hidden');
+  el.chipP2Timer.classList.add('hidden');
+
+  if(room.status === 'finished'){
+    showWinner();
+    return;
+  }
+
+  el.setupModal.classList.add('hidden');
+  el.gameScreen.classList.remove('hidden');
+  el.pairCounter.textContent = `Pair ${state.pairIndex} of ${state.totalPairs}`;
+
+  renderProblem();
+  renderPool();
+  updateScoreChips();
+  state.inputLocked = false; // safe to accept input now that we're in sync
+}
+
+function handleOnlineTileClick(tileId){
+  if(state.inputLocked) return;
+  const myIdx = state.myRole === 'host' ? 0 : 1;
+  if(state.currentPlayer !== myIdx) return; // not your turn
+
+  const tileIdx = state.pool.findIndex(t => t.id === tileId);
+  if(tileIdx === -1) return;
+  state.inputLocked = true;
+
+  const tile = state.pool[tileIdx];
+  const activeCell = state.cells[state.cellIndex];
+  const isCorrect = tile.value === activeCell.correct;
+  const player = state.players[myIdx];
+  const myKey = state.myRole;
+  const otherKey = myKey === 'host' ? 'guest' : 'host';
+  const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
+
+  const updates = {};
+
+  if(isCorrect){
+    slotEls.forEach(slotEl => {
+      slotEl.textContent = tile.value;
+      slotEl.classList.remove('active', 'pending');
+      slotEl.classList.add('filled', 'drop-correct');
+    });
+    el.feedbackLine.textContent = `Correct! ${player.name} +1`;
+    el.feedbackLine.className = 'feedback-line good';
+
+    const newPool = state.pool.filter((_, i) => i !== tileIdx);
+    const newCellIndex = state.cellIndex + 1;
+    updates[`players/${myKey}/score`] = player.score + 1;
+    updates.pool = newPool;
+    updates.cellIndex = newCellIndex;
+    updates.turn = otherKey;
+
+    if(newCellIndex >= state.cells.length){
+      if(state.pairIndex >= state.totalPairs){
+        updates.status = 'finished';
+      } else {
+        const nextProblem = generateProblem(state.room.settings);
+        const nextLayout = buildProblemLayout(nextProblem);
+        updates.problem = nextProblem;
+        updates.pool = buildPool(nextLayout.cells);
+        updates.cellIndex = 0;
+        updates.pairIndex = state.pairIndex + 1;
+      }
+    }
+  } else {
+    slotEls.forEach(slotEl => {
+      slotEl.classList.add('drop-wrong');
+      setTimeout(() => slotEl.classList.remove('drop-wrong'), 350);
+    });
+    el.feedbackLine.textContent = `Not quite. ${player.name} -1`;
+    el.feedbackLine.className = 'feedback-line bad';
+
+    updates[`players/${myKey}/score`] = player.score - 1;
+    updates.turn = otherKey;
+  }
+
+  submitRoomUpdate(state.roomCode, updates).catch(err => {
+    console.error('Failed to sync move:', err);
+    state.inputLocked = false;
+  });
+  // state.inputLocked is released once the listener's onRoomUpdate fires
+  // with the confirmed state (works for both the sender and the opponent).
+}
+
+/* =========================================================
+   Time control (chess-clock style: only the active player's
+   time counts down; it's paused whenever it's not their turn)
+   Local play only for now — see note on step-time-control.
+   ========================================================= */
+
+function startTimer(){
+  stopTimer(); // safety: never allow two intervals to stack
+  updateTimerDisplay();
+  state.timerId = setInterval(tickTimer, 1000);
+}
+
+function stopTimer(){
+  if(state.timerId !== null){
+    clearInterval(state.timerId);
+    state.timerId = null;
+  }
+}
+
+function tickTimer(){
+  const player = state.players[state.currentPlayer];
+  player.timeRemaining -= 1;
+
+  if(player.timeRemaining <= 0){
+    player.timeRemaining = 0;
+    updateTimerDisplay();
+    stopTimer();
+    handleTimeOut(state.currentPlayer);
+    return;
+  }
+  updateTimerDisplay();
+}
+
+function formatTime(totalSeconds){
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function updateTimerDisplay(){
+  if(state.timeControlSeconds <= 0) return;
+
+  const p1 = state.players[0];
+  el.chipP1Timer.textContent = formatTime(p1.timeRemaining);
+  el.chipP1Timer.classList.toggle('time-low', p1.timeRemaining <= 10);
+
+  if(state.players[1]){
+    const p2 = state.players[1];
+    el.chipP2Timer.textContent = formatTime(p2.timeRemaining);
+    el.chipP2Timer.classList.toggle('time-low', p2.timeRemaining <= 10);
+  }
+}
+
+/* A player hitting zero ends the game immediately. In vs mode the other
+   player wins outright, regardless of score. In solo mode there's no
+   opponent to award a win to, so it's just presented as time running out. */
+function handleTimeOut(playerIndex){
+  el.gameScreen.classList.add('hidden');
+  el.winnerModal.classList.remove('hidden');
+
+  const timedOutPlayer = state.players[playerIndex];
+
+  if(state.mode === 'solo'){
+    el.winnerHeading.textContent = "Time's up!";
+    el.winnerDetail.textContent = `${timedOutPlayer.name}, you ran out of time with a score of ${timedOutPlayer.score}.`;
+  } else {
+    const winner = state.players[playerIndex === 0 ? 1 : 0];
+    el.winnerHeading.textContent = `${winner.name} wins on time!`;
+    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${state.players[0].name}: ${state.players[0].score}\n${state.players[1].name}: ${state.players[1].score}`;
+  }
+}
+
+/* =========================================================
+   Round flow (local modes)
+   ========================================================= */
+
+function startNextPair(){
+  state.pairIndex++;
+  state.problem = generateProblem({ allowedOps: state.allowedOps, allowNegatives: state.allowNegatives });
+  state.layout = buildProblemLayout(state.problem);
+  state.cells = state.layout.cells;
+  state.cellIndex = 0;
+  state.pool = buildPool(state.cells);
+  state.inputLocked = false;
+
+  el.pairCounter.textContent = `Pair ${state.pairIndex} of ${state.totalPairs}`;
+  el.feedbackLine.textContent = '';
+  el.feedbackLine.className = 'feedback-line';
+
+  renderProblem();
+  renderPool();
+  updateScoreChips();
+}
+
+const fracHTML = (num, den) => `
+  <div class="fraction-block">
+    <span class="num">${num}</span>
+    <span class="vinculum"></span>
+    <span class="den">${den}</span>
+  </div>`;
+
+function cellHTML(i){
+  const cell = state.cells[i];
+  const status = i < state.cellIndex ? 'filled' : (i === state.cellIndex ? 'active' : 'pending');
+  const display = i < state.cellIndex ? cell.correct : (i === state.cellIndex ? '?' : '\u2013');
+  return `<div class="cell-slot ${status}" data-cell-index="${i}">${display}</div>`;
+}
+
+function partHTML(part){
+  return part.type === 'cell' ? cellHTML(part.cellIndex) : `<span class="inline-op">${part.symbol}</span>`;
+}
+
+function renderProblem(){
+  renderStackedLayout(state.layout);
+}
+
+function renderStackedLayout(layout){
+  const { a, b, op, c, d } = state.problem;
+
+  let html = `<div class="given-row">`;
+  html += fracHTML(a, b);
+  html += `<span class="operator-symbol">${op}</span>`;
+  html += fracHTML(c, d);
+  html += `</div>`;
+
+  layout.rows.forEach(row => {
+    html += `<div class="cross-row-wrap">`;
+    if(row.caption){ html += `<div class="row-caption">${row.caption}</div>`; }
+    html += `<div class="cross-row">`;
+    html += `<span class="row-equals">=</span>`;
+
+    if(row.kind === 'product'){
+      html += `<div class="fraction-product">`;
+      row.fractions.forEach((frac, idx) => {
+        html += `<div class="cross-fraction">`;
+        html += `<div class="row-numerator">${partHTML(frac.numerator)}</div>`;
+        html += `<div class="row-line"></div>`;
+        html += `<div class="row-denominator">${partHTML(frac.denominator)}</div>`;
+        html += `</div>`;
+        if(idx < row.fractions.length - 1){
+          html += `<span class="inline-op">${row.operator}</span>`;
+        }
+      });
+      html += `</div>`; // fraction-product
+    } else if(row.kind === 'whole'){
+      html += partHTML(row.value);
+    } else {
+      html += `<div class="cross-fraction">`;
+      html += `<div class="row-numerator">${row.numerator.map(partHTML).join('')}</div>`;
+      html += `<div class="row-line"></div>`;
+      html += `<div class="row-denominator">${row.denominator.map(partHTML).join('')}</div>`;
+      html += `</div>`;
+    }
+
+    html += `</div>`; // cross-row
+    html += `</div>`; // cross-row-wrap
+  });
+
+  el.problemStrip.innerHTML = html;
+  updateTurnFlag();
+}
+
+function renderPool(){
+  el.poolTray.innerHTML = '';
+  const myIdx = state.myRole === 'host' ? 0 : 1;
+  const myTurn = !state.isOnline || state.currentPlayer === myIdx;
+
+  state.pool.forEach(tile => {
+    const btn = document.createElement('button');
+    btn.className = 'tile-btn';
+    btn.textContent = tile.value;
+    btn.dataset.tileId = tile.id;
+    if(state.isOnline && !myTurn) btn.disabled = true;
+    btn.addEventListener('click', () => {
+      if(state.isOnline) handleOnlineTileClick(tile.id);
+      else handleTileClick(tile.id);
+    });
+    el.poolTray.appendChild(btn);
+  });
+}
+
+/* Removes just the one tapped tile from the DOM instead of rebuilding the
+   whole tray. Rebuilding all buttons on every click risked a fresh button
+   landing under the same finger/cursor position as the one just tapped,
+   which some browsers register as a second click — advancing two cells
+   for a single tap. (Online mode always does a full renderPool() via the
+   Firebase listener instead, since updates there are already async.) */
+function removeTileFromDOM(tileId){
+  const btn = el.poolTray.querySelector(`.tile-btn[data-tile-id="${tileId}"]`);
+  if(btn) btn.remove();
+}
+
+function updateScoreChips(){
+  el.chipP1Score.textContent = state.players[0].score;
+  if(state.players[1]) el.chipP2Score.textContent = state.players[1].score;
+
+  el.chipP1.classList.toggle('active-turn', state.currentPlayer === 0);
+  if(state.players[1]){
+    el.chipP2.classList.toggle('active-turn', state.currentPlayer === 1);
+  }
+}
+
+function updateTurnFlag(){
+  if(state.isOnline){
+    const myIdx = state.myRole === 'host' ? 0 : 1;
+    if(state.currentPlayer === myIdx){
+      el.turnFlag.textContent = 'Your turn!';
+    } else {
+      el.turnFlag.textContent = `Waiting for ${state.players[state.currentPlayer].name}...`;
+    }
+    return;
+  }
+  if(state.mode === 'vs'){
+    el.turnFlag.textContent = `${state.players[state.currentPlayer].name}'s turn`;
+  } else {
+    el.turnFlag.textContent = '';
+  }
+}
+
+/* =========================================================
+   Tile interaction (local modes)
+   ========================================================= */
+
+function handleTileClick(tileId){
+  if(state.inputLocked) return; // ignore any click while a previous one is still resolving
+  const tileIdx = state.pool.findIndex(t => t.id === tileId);
+  if(tileIdx === -1) return;
+  state.inputLocked = true;
+
+  const tile = state.pool[tileIdx];
+  const activeCell = state.cells[state.cellIndex];
+  const isCorrect = tile.value === activeCell.correct;
+  const player = state.players[state.currentPlayer];
+  // A cell index can appear in more than one box (e.g. the shared denominator),
+  // so update every matching box, not just the first.
+  const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
+
+  if(isCorrect){
+    player.score += 1;
+    state.pool.splice(tileIdx, 1); // consume the tile
+    removeTileFromDOM(tile.id);
+    slotEls.forEach(slotEl => {
+      slotEl.textContent = tile.value;
+      slotEl.classList.remove('active', 'pending');
+      slotEl.classList.add('filled', 'drop-correct');
+    });
+
+    el.feedbackLine.textContent = `Correct! ${player.name} +1`;
+    el.feedbackLine.className = 'feedback-line good';
+
+    state.cellIndex++;
+    if(state.mode === 'vs') advanceTurn();
+
+    if(state.cellIndex >= state.cells.length){
+      setTimeout(finishPair, 700); // startNextPair()/showWinner() will unlock
+      return;
+    }
+    setTimeout(() => { renderProblem(); state.inputLocked = false; }, 250);
+
+  } else {
+    player.score -= 1;
+    // NOTE: wrong tiles stay in the pool. The same numeric value can be the
+    // correct answer for more than one cell (e.g. denominators/cross terms
+    // that repeat), so removing a tile just because it was wrong here could
+    // strand a later cell with no matching tile left at all.
+
+    slotEls.forEach(slotEl => {
+      slotEl.classList.add('drop-wrong');
+      setTimeout(() => slotEl.classList.remove('drop-wrong'), 350);
+    });
+
+    el.feedbackLine.textContent = `Not quite. ${player.name} -1`;
+    el.feedbackLine.className = 'feedback-line bad';
+
+    if(state.mode === 'vs') advanceTurn();
+    state.inputLocked = false;
+  }
+
+  updateScoreChips();
+  updateTurnFlag();
+}
+
+function advanceTurn(){
+  state.currentPlayer = state.currentPlayer === 0 ? 1 : 0;
+}
+
+function finishPair(){
+  if(state.pairIndex >= state.totalPairs){
+    showWinner();
+  } else {
+    startNextPair();
+  }
+}
+
+/* =========================================================
+   Winner modal
+   ========================================================= */
+
+function showWinner(){
+  stopTimer();
+  el.gameScreen.classList.add('hidden');
+  el.winnerModal.classList.remove('hidden');
+
+  if(state.mode === 'solo'){
+    const p = state.players[0];
+    el.winnerHeading.textContent = 'Nice work!';
+    el.winnerDetail.textContent = `${p.name}, you finished with a score of ${p.score}.`;
+  } else {
+    const [p1, p2] = state.players;
+    let heading, detail;
+    if(p1.score === p2.score){
+      heading = "It's a tie!";
+      detail = `${p1.name} and ${p2.name} both scored ${p1.score}.`;
+    } else {
+      const winner = p1.score > p2.score ? p1 : p2;
+      const loser = p1.score > p2.score ? p2 : p1;
+      heading = `${winner.name} wins!`;
+      detail = `${winner.name}: ${winner.score}\n${loser.name}: ${loser.score}`;
+    }
+    el.winnerHeading.textContent = heading;
+    el.winnerDetail.textContent = detail;
+  }
+}

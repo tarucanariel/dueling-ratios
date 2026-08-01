@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAT's Dueling Ratios</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- Name / Mode setup modal -->
+<div class="modal-overlay" id="setup-modal">
+  <div class="modal chalk-panel">
+    <h1 class="game-title">AAT's Dueling Ratios</h1>
+    <p class="subtitle">Solve the fraction, one slot at a time.</p>
+
+    <div class="setup-step" id="step-name1">
+      <label for="player1-name">Your name</label>
+      <input type="text" id="player1-name" maxlength="16" placeholder="e.g. Mika" autocomplete="off">
+    </div>
+
+    <div class="setup-step" id="step-mode">
+      <label>How do you want to play?</label>
+      <div class="choice-row choice-row-3">
+        <button class="choice-btn" id="mode-solo" data-mode="solo">Solo</button>
+        <button class="choice-btn" id="mode-vs" data-mode="vs">Same Device</button>
+        <button class="choice-btn" id="mode-online" data-mode="online">Online</button>
+      </div>
+    </div>
+
+    <div class="setup-step hidden" id="step-name2">
+      <label for="player2-name">Opponent's name</label>
+      <input type="text" id="player2-name" maxlength="16" placeholder="e.g. Jordan" autocomplete="off">
+    </div>
+
+    <div class="setup-step hidden" id="step-online-choice">
+      <label>Online play</label>
+      <div class="choice-row">
+        <button class="choice-btn" id="online-create-btn" data-online-choice="create">Create Game</button>
+        <button class="choice-btn" id="online-join-btn" data-online-choice="join">Join Game</button>
+      </div>
+    </div>
+
+    <div class="setup-step hidden" id="step-join-code">
+      <label for="join-code-input">Room code</label>
+      <input type="text" id="join-code-input" maxlength="4" placeholder="e.g. 7XQ2" autocomplete="off" class="code-input">
+    </div>
+
+    <div class="setup-step" id="step-operations">
+      <label>Which operations do you want to practice?</label>
+      <div class="checkbox-grid">
+        <label class="checkbox-item all-ops">
+          <input type="checkbox" id="op-all" checked>
+          All Operations
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="op-choice" data-op="+" checked>
+          Addition
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="op-choice" data-op="-" checked>
+          Subtraction
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="op-choice" data-op="&#215;" checked>
+          Multiplication
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="op-choice" data-op="&#247;" checked>
+          Division
+        </label>
+      </div>
+    </div>
+
+    <div class="setup-step" id="step-negatives">
+      <label class="checkbox-item">
+        <input type="checkbox" id="allow-negatives">
+        Allow negatives (practice integer arithmetic)
+      </label>
+    </div>
+
+    <div class="setup-step" id="step-pair-count">
+      <label for="pair-count-select">How many fractions do you want to solve?</label>
+      <select id="pair-count-select">
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3" selected>3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+      </select>
+    </div>
+
+    <div class="setup-step" id="step-time-control">
+      <label for="time-control-select">Time control</label>
+      <select id="time-control-select">
+        <option value="0" selected>No timer</option>
+        <option value="30">30 seconds</option>
+        <option value="45">45 seconds</option>
+        <option value="60">1 minute</option>
+        <option value="120">2 minutes</option>
+        <option value="180">3 minutes</option>
+        <option value="300">5 minutes</option>
+      </select>
+      <p class="field-note" id="time-control-note">Not available in Online mode yet.</p>
+    </div>
+
+    <button class="primary-btn hidden" id="start-game-btn">Start Game</button>
+    <p class="setup-error" id="setup-error"></p>
+  </div>
+</div>
+
+<!-- Online: waiting for opponent -->
+<div class="modal-overlay hidden" id="waiting-modal">
+  <div class="modal chalk-panel">
+    <h2 class="game-title" style="font-size:1.8rem;">Waiting for opponent&hellip;</h2>
+    <p class="subtitle">Share this room code with the other player:</p>
+    <div class="room-code-display" id="room-code-display">----</div>
+    <p class="subtitle" id="waiting-note">They'll join automatically once they enter the code.</p>
+    <button class="primary-btn" id="cancel-waiting-btn">Cancel</button>
+  </div>
+</div>
+
+<!-- Main game screen -->
+<div class="game-wrap hidden" id="game-screen">
+
+  <header class="score-bar">
+    <div class="player-chip player-one" id="chip-p1">
+      <span class="chip-name" id="chip-p1-name">Player 1</span>
+      <span class="chip-score" id="chip-p1-score">0</span>
+      <span class="chip-timer hidden" id="chip-p1-timer">--:--</span>
+    </div>
+
+    <div class="round-info">
+      <span class="pair-counter" id="pair-counter">Pair 1 of 3</span>
+      <span class="turn-flag" id="turn-flag"></span>
+    </div>
+
+    <div class="player-chip player-two hidden" id="chip-p2">
+      <span class="chip-name" id="chip-p2-name">Player 2</span>
+      <span class="chip-score" id="chip-p2-score">0</span>
+      <span class="chip-timer hidden" id="chip-p2-timer">--:--</span>
+    </div>
+  </header>
+
+  <main class="board-area">
+    <div class="board-main">
+      <div class="problem-strip" id="problem-strip">
+        <!-- fraction display + operator + grid injected by JS -->
+      </div>
+      <div class="feedback-line" id="feedback-line" aria-live="polite"></div>
+    </div>
+
+    <aside class="pool-sidebar">
+      <div class="pool-label">Tap a number for the glowing slot</div>
+      <div class="pool-tray" id="pool-tray"></div>
+    </aside>
+  </main>
+</div>
+
+<!-- Winner modal -->
+<div class="modal-overlay hidden" id="winner-modal">
+  <div class="modal chalk-panel">
+    <h2 id="winner-heading">Game Over</h2>
+    <p id="winner-detail"></p>
+    <button class="primary-btn" id="play-again-btn">Play Again</button>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
