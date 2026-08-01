@@ -1,15 +1,28 @@
+/* =========================================================
+   Theme note: variable NAMES are kept from the original
+   "chalkboard" theme to minimize the diff, but their VALUES
+   now match AAT's Dueling Digits' purple/cyan neon-glass look:
+     --amber, --teal  -> cyan accent (#00d2ff)
+     --coral          -> violet/secondary, player 2 identity (#8a2be2)
+     --good / --bad   -> success green / danger pink-red
+     --slate/-light   -> near-black purple bg / card panel bg
+   ========================================================= */
 :root{
-  --slate: #1B2430;
-  --slate-light: #242F3D;
-  --chalk: #F2EFE9;
-  --chalk-dim: #B9C2CC;
-  --amber: #E8A33D;
-  --teal: #4FB3A9;
-  --coral: #E8674F;
-  --good: #6FCF97;
-  --bad: #E8674F;
-  --line: rgba(242,239,233,0.14);
-  --radius: 10px;
+  --slate: #090715;
+  --slate-light: #150f36;
+  --chalk: #ffffff;
+  --chalk-dim: #cccccc;
+  --amber: #00d2ff;
+  --teal: #00d2ff;
+  --coral: #8a2be2;
+  --good: #00ff88;
+  --bad: #ff3366;
+  --line: rgba(138,43,226,0.25);
+  --radius: 12px;
+  --primary: #6a11cb;
+  --secondary: #8a2be2;
+  --btn-gradient: linear-gradient(135deg, var(--primary), var(--secondary));
+  --btn-gradient-hover: linear-gradient(135deg, #7a1bdb, #9a3cff);
 }
 
 *{ box-sizing: border-box; }
@@ -17,10 +30,7 @@
 body{
   margin:0;
   min-height:100vh;
-  background:
-    radial-gradient(circle at 20% 10%, rgba(79,179,169,0.08), transparent 40%),
-    radial-gradient(circle at 85% 80%, rgba(232,163,61,0.07), transparent 45%),
-    var(--slate);
+  background: linear-gradient(135deg, #090715, #0f0c29);
   color:var(--chalk);
   font-family:'Inter', sans-serif;
   display:flex;
@@ -34,7 +44,7 @@ body{
 /* ---------- Modal ---------- */
 .modal-overlay{
   position:fixed; inset:0;
-  background:rgba(10,14,20,0.72);
+  background:rgba(9,7,21,0.78);
   display:flex; align-items:center; justify-content:center;
   z-index:50;
   padding:16px;
@@ -50,15 +60,19 @@ body{
   max-height:calc(100vh - 32px);
   overflow-y:auto;
   -webkit-overflow-scrolling:touch;
-  box-shadow:0 20px 60px rgba(0,0,0,0.45);
+  box-shadow:0 20px 60px rgba(0,0,0,0.45), 0 0 40px rgba(106,17,203,0.18);
 }
 
 .game-title{
-  font-family:'Patrick Hand', cursive;
-  font-size:2.6rem;
+  font-family:'Inter', sans-serif;
+  font-weight:800;
+  font-size:2.4rem;
   margin:0 0 4px;
-  color:var(--amber);
-  letter-spacing:0.5px;
+  letter-spacing:0.2px;
+  background: linear-gradient(90deg, var(--amber), var(--secondary));
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
 }
 
 .subtitle{
@@ -81,7 +95,7 @@ body{
 .setup-step input{
   width:100%;
   padding:11px 13px;
-  border-radius:8px;
+  border-radius:10px;
   border:1px solid var(--line);
   background:var(--slate);
   color:var(--chalk);
@@ -92,7 +106,7 @@ body{
 .setup-step select{
   width:100%;
   padding:11px 13px;
-  border-radius:8px;
+  border-radius:10px;
   border:1px solid var(--line);
   background:var(--slate);
   color:var(--chalk);
@@ -100,7 +114,7 @@ body{
   font-size:0.98rem;
   cursor:pointer;
   appearance:none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'><path d='M4 6l4 4 4-4' stroke='%23B9C2CC' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'><path d='M4 6l4 4 4-4' stroke='%23cccccc' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat:no-repeat;
   background-position:right 14px center;
 }
@@ -128,18 +142,24 @@ body{
 .choice-btn{
   flex:1;
   padding:14px 10px;
-  border-radius:8px;
+  border-radius:var(--radius);
   border:1px solid var(--line);
-  background:var(--slate);
+  background:rgba(138,43,226,0.1);
   color:var(--chalk);
   font-family:'Inter', sans-serif;
   font-weight:600;
   font-size:0.9rem;
+  text-transform:uppercase;
+  letter-spacing:0.03em;
   cursor:pointer;
-  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
 }
 
-.choice-btn:hover{ border-color:var(--teal); }
+.choice-btn:hover{
+  border-color:var(--amber);
+  background:rgba(0,210,255,0.1);
+  transform:translateY(-2px);
+}
 
 .field-note{
   font-size:0.78rem;
@@ -161,8 +181,11 @@ body{
   font-weight:700;
   letter-spacing:0.25em;
   text-align:center;
-  color:var(--amber);
-  background:var(--slate);
+  background: linear-gradient(90deg, var(--amber), var(--secondary));
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+  background-color:var(--slate);
   border:1px solid var(--line);
   border-radius:10px;
   padding:16px 8px;
@@ -202,8 +225,9 @@ body{
 }
 
 .choice-btn.selected{
-  border-color:var(--amber);
-  background:rgba(232,163,61,0.14);
+  border-color:var(--secondary);
+  background:rgba(138,43,226,0.28);
+  box-shadow:0 0 0 1px rgba(138,43,226,0.3);
 }
 
 .primary-btn{
@@ -211,20 +235,27 @@ body{
   padding:14px;
   margin-top:6px;
   border:none;
-  border-radius:8px;
-  background:var(--amber);
-  color:#20180a;
+  border-radius:var(--radius);
+  background:var(--btn-gradient);
+  color:#ffffff;
   font-weight:700;
-  font-size:1rem;
+  font-size:0.95rem;
+  text-transform:uppercase;
+  letter-spacing:0.04em;
   cursor:pointer;
-  transition:transform 0.1s, filter 0.15s;
+  box-shadow:0 8px 25px rgba(106,17,203,0.35);
+  transition:transform 0.15s, box-shadow 0.15s, background 0.15s;
 }
 
-.primary-btn:hover{ filter:brightness(1.08); }
+.primary-btn:hover{
+  transform:translateY(-2px);
+  background:var(--btn-gradient-hover);
+  box-shadow:0 10px 30px rgba(106,17,203,0.5);
+}
 .primary-btn:active{ transform:scale(0.98); }
 
 .setup-error{
-  color:var(--coral);
+  color:var(--bad);
   font-size:0.85rem;
   min-height:1.2em;
   margin:10px 0 0;
@@ -249,7 +280,7 @@ body{
   flex-direction:column;
   align-items:center;
   padding:10px 20px;
-  border-radius:10px;
+  border-radius:var(--radius);
   background:var(--slate-light);
   border:2px solid transparent;
   min-width:110px;
@@ -258,7 +289,7 @@ body{
 
 .player-chip.active-turn{
   border-color: var(--player-color, var(--amber));
-  box-shadow:0 0 0 3px rgba(232,163,61,0.15);
+  box-shadow:0 0 0 3px rgba(0,210,255,0.15);
 }
 
 .player-one{ --player-color: var(--teal); }
@@ -299,8 +330,9 @@ body{
 }
 
 .pair-counter{
-  font-family:'Patrick Hand', cursive;
-  font-size:1.3rem;
+  font-family:'Inter', sans-serif;
+  font-weight:700;
+  font-size:1.1rem;
   color:var(--chalk-dim);
 }
 
@@ -320,6 +352,7 @@ body{
   display:flex;
   align-items:flex-start;
   gap:16px;
+  box-shadow:0 8px 32px rgba(106,17,203,0.15);
 }
 
 .board-main{
@@ -366,10 +399,12 @@ body{
 }
 
 .row-caption{
-  font-family:'Patrick Hand', cursive;
-  font-size:0.95rem;
-  color:var(--teal);
-  letter-spacing:0.02em;
+  font-family:'Inter', sans-serif;
+  font-weight:700;
+  font-size:0.8rem;
+  text-transform:uppercase;
+  letter-spacing:0.05em;
+  color:var(--amber);
 }
 
 .cross-row{
@@ -484,7 +519,7 @@ body{
 .cell-slot{
   width:56px;
   height:56px;
-  border-radius:8px;
+  border-radius:10px;
   border:2px dashed var(--line);
   display:flex;
   align-items:center;
@@ -493,7 +528,7 @@ body{
   font-size:1.3rem;
   font-weight:700;
   color:var(--chalk-dim);
-  background:rgba(0,0,0,0.15);
+  background:rgba(255,255,255,0.04);
   transition: all 0.2s;
 }
 
@@ -503,7 +538,7 @@ body{
   border-style:solid;
   border-color:var(--amber);
   color:var(--amber);
-  box-shadow:0 0 0 4px rgba(232,163,61,0.15);
+  box-shadow:0 0 0 4px rgba(0,210,255,0.15);
   animation: pulse-glow 1.4s ease-in-out infinite;
 }
 
@@ -511,12 +546,12 @@ body{
   border-style:solid;
   border-color:var(--good);
   color:var(--chalk);
-  background:rgba(111,207,151,0.12);
+  background:rgba(0,255,136,0.12);
 }
 
 @keyframes pulse-glow{
-  0%, 100%{ box-shadow:0 0 0 4px rgba(232,163,61,0.12); }
-  50%{ box-shadow:0 0 0 8px rgba(232,163,61,0.05); }
+  0%, 100%{ box-shadow:0 0 0 4px rgba(0,210,255,0.12); }
+  50%{ box-shadow:0 0 0 8px rgba(0,210,255,0.05); }
 }
 
 .cell-slot.drop-correct{ animation: drop-in 0.35s ease; }
@@ -546,7 +581,7 @@ body{
 .pool-tray{
   display:flex;
   flex-wrap:wrap;
-  gap:6px;
+  gap:8px;
   justify-content:center;
   align-content:flex-start;
   max-height:60vh;
@@ -555,29 +590,33 @@ body{
 }
 
 .tile-btn{
-  width:38px;
-  height:38px;
-  border-radius:7px;
-  border:1px solid var(--line);
-  background:var(--slate);
-  color:var(--chalk);
+  width:42px;
+  height:42px;
+  border-radius:50%;
+  border:none;
+  background:var(--btn-gradient);
+  color:#ffffff;
   font-family:'JetBrains Mono', monospace;
-  font-size:0.88rem;
+  font-size:0.85rem;
   font-weight:700;
   cursor:pointer;
-  transition: transform 0.1s, border-color 0.15s, background 0.15s;
+  box-shadow:0 4px 14px rgba(106,17,203,0.35);
+  transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
 }
 
 .tile-btn:hover:not(:disabled){
-  border-color:var(--teal);
-  transform:translateY(-2px);
+  transform:translateY(-2px) scale(1.05);
+  filter:brightness(1.12);
+  box-shadow:0 6px 18px rgba(106,17,203,0.55);
 }
 
-.tile-btn:active:not(:disabled){ transform:scale(0.95); }
+.tile-btn:active:not(:disabled){ transform:scale(0.92); }
 
 .tile-btn:disabled{
-  opacity:0.25;
-  cursor:default;
+  opacity:0.3;
+  filter:grayscale(60%);
+  cursor:not-allowed;
+  box-shadow:none;
 }
 
 .feedback-line{
@@ -593,10 +632,14 @@ body{
 
 /* ---------- Winner modal ---------- */
 #winner-heading{
-  font-family:'Patrick Hand', cursive;
-  font-size:2.2rem;
-  color:var(--amber);
+  font-family:'Inter', sans-serif;
+  font-weight:800;
+  font-size:2rem;
   margin:0 0 12px;
+  background: linear-gradient(90deg, var(--amber), var(--secondary));
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
 }
 
 #winner-detail{
@@ -639,7 +682,7 @@ body{
     max-height:none;
     overflow-y:visible;
   }
-  .tile-btn{ width:36px; height:36px; font-size:0.85rem; }
+  .tile-btn{ width:38px; height:38px; font-size:0.8rem; }
 }
 
 /* Short viewports (landscape phones, small laptops) need compression
@@ -654,7 +697,7 @@ body{
 
 /* ---------- Accessibility: visible focus ---------- */
 button:focus-visible, input:focus-visible{
-  outline:3px solid var(--teal);
+  outline:3px solid var(--amber);
   outline-offset:2px;
 }
 
