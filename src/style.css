@@ -651,6 +651,7 @@ body{
 
 /* ---------- Responsive ---------- */
 @media (max-width: 520px){
+  body{ padding:10px; }
   .game-title{ font-size:1.9rem; }
   .subtitle{ font-size:0.85rem; margin-bottom:16px; }
   .chalk-panel{ padding:20px 18px; border-radius:14px; }
@@ -660,17 +661,19 @@ body{
   .choice-btn{ padding:11px 8px; font-size:0.84rem; }
   .primary-btn{ padding:12px; font-size:0.95rem; }
 
-  .fraction-block{ font-size:1.15rem; }
-  .cell-slot{ width:40px; height:40px; font-size:0.95rem; }
+  .board-area{ padding:16px 12px; gap:12px; }
+  .fraction-block{ font-size:1.1rem; }
+  .cell-slot{ width:38px; height:38px; font-size:0.92rem; }
   .player-chip{ min-width:80px; padding:8px 12px; }
-  .cross-row{ gap:6px; }
-  .row-numerator, .row-denominator{ gap:5px; }
-  .inline-op{ font-size:0.9rem; padding:0; }
+  .cross-row{ gap:5px; }
+  .row-numerator, .row-denominator{ gap:4px; }
+  .inline-op{ font-size:0.85rem; padding:0; }
 }
 
 /* Below ~430px a fixed side rail eats too much width from the board,
-   so the pool drops beneath it instead — still compact, still visible
-   without scrolling the page. */
+   so the pool drops beneath it instead — and since it's no longer
+   squeezed into a 96px column, the tiles get BIGGER here, not smaller,
+   for easier tapping and reading on phones. */
 @media (max-width: 430px){
   .board-area{ flex-direction:column; }
   .pool-sidebar{
@@ -681,8 +684,9 @@ body{
   .pool-tray{
     max-height:none;
     overflow-y:visible;
+    gap:12px;
   }
-  .tile-btn{ width:38px; height:38px; font-size:0.8rem; }
+  .tile-btn{ width:54px; height:54px; font-size:1.15rem; }
 }
 
 /* Short viewports (landscape phones, small laptops) need compression
