@@ -451,6 +451,7 @@ function handleOnlineTileClick(tileId){
   const activeCell = state.cells[state.cellIndex];
   const isCorrect = tile.value === activeCell.correct;
   const player = state.players[myIdx];
+  const tileEl = el.poolTray.querySelector(`.tile-btn[data-tile-id="${tileId}"]`);
   const myKey = state.myRole;
   const otherKey = myKey === 'host' ? 'guest' : 'host';
   const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
@@ -459,6 +460,7 @@ function handleOnlineTileClick(tileId){
 
   if(isCorrect){
     playSound('correct');
+    animateTileThrow(tileEl, slotEls[0], 'correct');
     slotEls.forEach(slotEl => {
       slotEl.textContent = tile.value;
       slotEl.classList.remove('active', 'pending');
@@ -489,6 +491,7 @@ function handleOnlineTileClick(tileId){
     }
   } else {
     playSound('wrong');
+    animateTileThrow(tileEl, slotEls[0], 'wrong');
     slotEls.forEach(slotEl => {
       slotEl.classList.add('drop-wrong');
       setTimeout(() => slotEl.classList.remove('drop-wrong'), 350);
@@ -824,6 +827,51 @@ function removeTileFromDOM(tileId){
   if(btn) btn.remove();
 }
 
+/* Purely cosmetic: spawns a floating clone of the tapped tile and arcs it
+   toward the target box, then removes itself. Runs independently of the
+   score/board update logic — it doesn't delay or gate anything else, so
+   it can't reintroduce the double-click timing issue we fixed earlier.
+   'correct' arcs in and shrinks into place; 'wrong' arcs partway, then
+   bounces back and fades, echoing the box's own reject-shake. */
+function animateTileThrow(tileEl, targetEl, variant){
+  if(!tileEl || !targetEl) return;
+  const startRect = tileEl.getBoundingClientRect();
+  const endRect = targetEl.getBoundingClientRect();
+  const computed = window.getComputedStyle(tileEl);
+
+  const clone = document.createElement('div');
+  clone.className = 'thrown-tile' + (variant === 'wrong' ? ' thrown-tile-wrong' : '');
+  clone.textContent = tileEl.textContent;
+  clone.style.left = startRect.left + 'px';
+  clone.style.top = startRect.top + 'px';
+  clone.style.width = startRect.width + 'px';
+  clone.style.height = startRect.height + 'px';
+  clone.style.fontSize = computed.fontSize;
+  document.body.appendChild(clone);
+
+  const dx = (endRect.left + endRect.width / 2) - (startRect.left + startRect.width / 2);
+  const dy = (endRect.top + endRect.height / 2) - (startRect.top + startRect.height / 2);
+
+  const keyframes = variant === 'wrong'
+    ? [
+        { transform: 'translate(0,0) scale(1)', offset: 0 },
+        { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 30}px) scale(1.05)`, offset: 0.45 },
+        { transform: `translate(${dx * 0.85}px, ${dy * 0.85}px) scale(0.9)`, offset: 0.65 },
+        { transform: `translate(${dx * 0.55}px, ${dy * 0.55 - 12}px) scale(0.7)`, opacity: 0, offset: 1 },
+      ]
+    : [
+        { transform: 'translate(0,0) scale(1)', offset: 0 },
+        { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) scale(1.05)`, offset: 0.5 },
+        { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0.85, offset: 1 },
+      ];
+
+  const anim = clone.animate(keyframes, {
+    duration: variant === 'wrong' ? 420 : 380,
+    easing: variant === 'wrong' ? 'ease-out' : 'ease-in',
+  });
+  anim.onfinish = () => clone.remove();
+}
+
 function updateScoreChips(){
   el.chipP1Score.textContent = state.players[0].score;
   if(state.players[1]) el.chipP2Score.textContent = state.players[1].score;
@@ -865,12 +913,14 @@ function handleTileClick(tileId){
   const activeCell = state.cells[state.cellIndex];
   const isCorrect = tile.value === activeCell.correct;
   const player = state.players[state.currentPlayer];
+  const tileEl = el.poolTray.querySelector(`.tile-btn[data-tile-id="${tileId}"]`);
   // A cell index can appear in more than one box (e.g. the shared denominator),
   // so update every matching box, not just the first.
   const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
 
   if(isCorrect){
     playSound('correct');
+    animateTileThrow(tileEl, slotEls[0], 'correct');
     player.score += 1;
     player.correctCount += 1;
     state.pool.splice(tileIdx, 1); // consume the tile
@@ -895,6 +945,7 @@ function handleTileClick(tileId){
 
   } else {
     playSound('wrong');
+    animateTileThrow(tileEl, slotEls[0], 'wrong');
     player.score -= 1;
     player.wrongCount += 1;
     // NOTE: wrong tiles stay in the pool. The same numeric value can be the

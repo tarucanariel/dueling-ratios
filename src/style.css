@@ -732,6 +732,28 @@ body{
   box-shadow:none;
 }
 
+/* Floating clone used by animateTileThrow() — position:fixed so it can
+   arc freely across the viewport regardless of any container's overflow. */
+.thrown-tile{
+  position:fixed;
+  z-index:999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:50%;
+  background:var(--btn-gradient);
+  color:#ffffff;
+  font-family:'JetBrains Mono', monospace;
+  font-weight:700;
+  box-shadow:0 4px 14px rgba(106,17,203,0.45);
+  pointer-events:none;
+}
+
+.thrown-tile-wrong{
+  background: linear-gradient(135deg, var(--bad), #ff6b8a);
+  box-shadow:0 4px 14px rgba(255,51,102,0.45);
+}
+
 .feedback-line{
   text-align:center;
   min-height:1.4em;
