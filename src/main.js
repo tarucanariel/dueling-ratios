@@ -649,8 +649,20 @@ function showOnlineWinnerModal(room){
   }
 
   if(hostP.score === guestP.score){
-    el.winnerHeading.textContent = "It's a tie!";
-    el.winnerDetail.textContent = `${hostP.name} and ${guestP.name} both scored ${hostP.score}.`;
+    const timerOn = room.settings.timeControlSeconds > 0;
+    const hostTime = room.timeRemaining?.host;
+    const guestTime = room.timeRemaining?.guest;
+    if(timerOn && hostTime !== guestTime){
+      const winner = hostTime > guestTime ? hostP : guestP;
+      const loser = hostTime > guestTime ? guestP : hostP;
+      const winnerTime = hostTime > guestTime ? hostTime : guestTime;
+      const loserTime = hostTime > guestTime ? guestTime : hostTime;
+      el.winnerHeading.textContent = `${winner.name} wins the tiebreaker!`;
+      el.winnerDetail.textContent = `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(Math.round(winnerTime))} remaining\n${loser.name}: ${formatTime(Math.round(loserTime))} remaining`;
+    } else {
+      el.winnerHeading.textContent = "It's a tie!";
+      el.winnerDetail.textContent = `${hostP.name} and ${guestP.name} both scored ${hostP.score}.`;
+    }
   } else {
     const winner = hostP.score > guestP.score ? hostP : guestP;
     const loser = hostP.score > guestP.score ? guestP : hostP;
@@ -902,8 +914,16 @@ function showWinner(){
     const [p1, p2] = state.players;
     let heading, detail;
     if(p1.score === p2.score){
-      heading = "It's a tie!";
-      detail = `${p1.name} and ${p2.name} both scored ${p1.score}.`;
+      const timerOn = state.timeControlSeconds > 0;
+      if(timerOn && p1.timeRemaining !== p2.timeRemaining){
+        const winner = p1.timeRemaining > p2.timeRemaining ? p1 : p2;
+        const loser = p1.timeRemaining > p2.timeRemaining ? p2 : p1;
+        heading = `${winner.name} wins the tiebreaker!`;
+        detail = `Tied at ${p1.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(winner.timeRemaining)} remaining\n${loser.name}: ${formatTime(loser.timeRemaining)} remaining`;
+      } else {
+        heading = "It's a tie!";
+        detail = `${p1.name} and ${p2.name} both scored ${p1.score}.`;
+      }
     } else {
       const winner = p1.score > p2.score ? p1 : p2;
       const loser = p1.score > p2.score ? p2 : p1;
