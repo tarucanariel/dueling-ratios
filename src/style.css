@@ -670,23 +670,29 @@ body{
   .inline-op{ font-size:0.85rem; padding:0; }
 }
 
-/* Below ~430px a fixed side rail eats too much width from the board,
-   so the pool drops beneath it instead — and since it's no longer
-   squeezed into a 96px column, the tiles get BIGGER here, not smaller,
-   for easier tapping and reading on phones. */
+/* Below ~430px, the board needs every bit of width it can get, so the
+   side column shrinks further here — but it STAYS on the side rather
+   than dropping below the board. Keeping it anchored (via position:sticky
+   on .pool-sidebar) means players never have to scroll the page up and
+   down between the board and the pool; if there are more tiles than fit,
+   the small tray itself scrolls internally instead.
+
+   The column here is single-file (one tile per row) rather than two —
+   that lets tiles be bigger while the column's total footprint stays
+   narrow, freeing up width the busiest (LCD/cross-multiply) board needs
+   to avoid wrapping its numerator row. The "=" sign was still at full
+   desktop size before this — quietly eating width — so it's shrunk here too. */
 @media (max-width: 430px){
-  .board-area{ flex-direction:column; }
-  .pool-sidebar{
-    flex:none;
-    width:100%;
-    position:static;
-  }
-  .pool-tray{
-    max-height:none;
-    overflow-y:visible;
-    gap:12px;
-  }
-  .tile-btn{ width:54px; height:54px; font-size:1.15rem; }
+  body{ padding:8px; }
+  .board-area{ padding:12px 8px; gap:6px; }
+  .pool-sidebar{ flex:0 0 50px; gap:8px; }
+  .tile-btn{ width:44px; height:44px; font-size:0.95rem; }
+
+  .cell-slot{ width:34px; height:34px; font-size:0.85rem; }
+  .cross-row{ gap:4px; }
+  .row-numerator, .row-denominator{ gap:3px; }
+  .inline-op{ font-size:0.75rem; padding:0; }
+  .row-equals{ font-size:1.15rem; }
 }
 
 /* Short viewports (landscape phones, small laptops) need compression
