@@ -57,13 +57,14 @@ export function appendSimplifyStep(cells, rows, resultNum, resultDen){
    Fraction pair generation
    ========================================================= */
 
-/* Numerator draw: 0-9, randomly signed when negatives are enabled.
-   Denominators never go through this — they always stay positive,
-   which is the standard convention (a negative fraction is written
-   as -3/4, not with a negative denominator). */
+/* Numerator draw: 1-10 (no zero — a zero numerator isn't a meaningful
+   fraction to solve), randomly signed when negatives are enabled.
+   Denominators go through a separate 1-9 draw (see generateProblem) and
+   are untouched by this change — a zero denominator was already excluded
+   from the start since it's undefined, so there was nothing to remove there. */
 export function randNumerator(allowNegatives){
-  const magnitude = randInt(0, 9);
-  if(allowNegatives && magnitude !== 0 && randInt(0, 1) === 1){
+  const magnitude = randInt(1, 10);
+  if(allowNegatives && randInt(0, 1) === 1){
     return -magnitude;
   }
   return magnitude;
@@ -77,7 +78,7 @@ export function generateProblem(opts){
   let a, b, c, d;
   b = randInt(1, 9);
   a = randNumerator(allowNegatives);
-  do { c = randNumerator(allowNegatives); } while(op === '\u00F7' && c === 0); // can't divide by 0/d
+  c = randNumerator(allowNegatives); // never 0 now, so division-by-zero-fraction can't happen
 
   if(op === '+' || op === '-'){
     // 50/50 between similar (equal denominators) and dissimilar boards
@@ -265,7 +266,7 @@ let tileIdCounter = 0;
 
 export function buildPool(cells){
   const values = cells.map(c => c.correct);
-  const maxVal = Math.max(...values, 9);
+  const maxVal = Math.max(...values, 10);
   const minVal = Math.min(...values, 0);
   const numDistractors = randInt(3, 5);
 
