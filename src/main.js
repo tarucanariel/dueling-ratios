@@ -31,6 +31,7 @@ const state = {
   roomCode: null,
   myRole: null,          // 'host' | 'guest'
   unsubscribeRoom: null,
+  onlineTimerPollId: null, // setInterval handle for the online chess-clock poll
 };
 
 /* ---------- DOM refs ---------- */
@@ -49,7 +50,6 @@ const el = {
   opChoices: document.querySelectorAll('.op-choice'),
   pairCountSelect: document.getElementById('pair-count-select'),
   timeControlSelect: document.getElementById('time-control-select'),
-  timeControlNote: document.getElementById('time-control-note'),
   allowNegatives: document.getElementById('allow-negatives'),
 
   stepOperations: document.getElementById('step-operations'),
@@ -143,16 +143,14 @@ function updateStepVisibility(){
   el.stepOnlineChoice.classList.toggle('hidden', mode !== 'online');
   el.stepJoinCode.classList.toggle('hidden', !(mode === 'online' && onlineChoice === 'join'));
 
-  // Operations/pair-count/negatives: local modes always show them;
-  // online only shows them once "Create Game" is chosen (the guest
+  // Operations/pair-count/negatives/time-control: local modes always show
+  // them; online only shows them once "Create Game" is chosen (the guest
   // inherits whatever the host picked, so they don't choose anything).
   const showHostSettings = (mode === 'solo' || mode === 'vs') || (mode === 'online' && onlineChoice === 'create');
   el.stepOperations.classList.toggle('hidden', !showHostSettings);
   el.stepNegatives.classList.toggle('hidden', !showHostSettings);
   el.stepPairCount.classList.toggle('hidden', !showHostSettings);
-
-  // Time control isn't synced across devices yet, so it's local-only for now.
-  el.stepTimeControl.classList.toggle('hidden', mode === 'online');
+  el.stepTimeControl.classList.toggle('hidden', !showHostSettings);
 
   // Start button: only appears once we know what it should do.
   const ready = mode === 'solo' || mode === 'vs' || (mode === 'online' && onlineChoice);
@@ -255,6 +253,7 @@ function leaveOnlineRoom(){
     state.unsubscribeRoom();
     state.unsubscribeRoom = null;
   }
+  stopOnlineTimerPoll();
   state.isOnline = false;
   state.roomCode = null;
   state.myRole = null;
@@ -285,6 +284,7 @@ async function handleCreateGame(){
     allowedOps: selectedOps,
     totalPairs: parseInt(el.pairCountSelect.value, 10),
     allowNegatives: el.allowNegatives.checked,
+    timeControlSeconds: parseInt(el.timeControlSelect.value, 10),
   };
 
   el.startBtn.disabled = true;
@@ -393,12 +393,20 @@ function onRoomUpdate(room){
   el.chipP1Name.textContent = hostP.name + (state.myRole === 'host' ? ' (You)' : '');
   el.chipP2Name.textContent = guestP.name + (state.myRole === 'guest' ? ' (You)' : '');
   el.chipP2.classList.remove('hidden');
-  el.chipP1Timer.classList.add('hidden');
-  el.chipP2Timer.classList.add('hidden');
+
+  const timerOn = room.settings.timeControlSeconds > 0;
+  el.chipP1Timer.classList.toggle('hidden', !timerOn);
+  el.chipP2Timer.classList.toggle('hidden', !timerOn);
 
   if(room.status === 'finished'){
-    showWinner();
+    showOnlineWinnerModal(room);
     return;
+  }
+
+  if(timerOn){
+    if(!state.onlineTimerPollId) startOnlineTimerPoll();
+  } else {
+    stopOnlineTimerPoll();
   }
 
   el.setupModal.classList.add('hidden');
@@ -472,6 +480,16 @@ function handleOnlineTileClick(tileId){
     updates.turn = otherKey;
   }
 
+  // Rotate the chess clock: bank however much time I (the player who just
+  // acted) had left, then start a fresh deadline for whoever's turn is next.
+  if(state.room.settings.timeControlSeconds > 0 && state.room.turnDeadline){
+    const now = Date.now();
+    const myRemaining = Math.max(0, (state.room.turnDeadline - now) / 1000);
+    updates[`timeRemaining/${myKey}`] = myRemaining;
+    const otherRemaining = state.room.timeRemaining[otherKey];
+    updates.turnDeadline = now + otherRemaining * 1000;
+  }
+
   submitRoomUpdate(state.roomCode, updates).catch(err => {
     console.error('Failed to sync move:', err);
     state.inputLocked = false;
@@ -481,9 +499,10 @@ function handleOnlineTileClick(tileId){
 }
 
 /* =========================================================
-   Time control (chess-clock style: only the active player's
-   time counts down; it's paused whenever it's not their turn)
-   Local play only for now — see note on step-time-control.
+   Time control — local (chess-clock style: only the active player's
+   time counts down, paused whenever it's not their turn). See the
+   "Online time control" section further down for the online version,
+   which syncs via an absolute deadline instead of a local tick.
    ========================================================= */
 
 function startTimer(){
@@ -550,6 +569,93 @@ function handleTimeOut(playerIndex){
     const winner = state.players[playerIndex === 0 ? 1 : 0];
     el.winnerHeading.textContent = `${winner.name} wins on time!`;
     el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${state.players[0].name}: ${state.players[0].score}\n${state.players[1].name}: ${state.players[1].score}`;
+  }
+}
+
+/* =========================================================
+   Online time control — deadline-based, not a locally-ticking
+   counter, so the two devices can't drift apart from each other.
+   Both devices poll independently, so a timeout still gets reported
+   even if whoever ran out of time has gone quiet (closed tab, lost
+   connection, etc.) — by design, their clock keeps running either way.
+   ========================================================= */
+
+function startOnlineTimerPoll(){
+  stopOnlineTimerPoll(); // safety: never allow two intervals to stack
+  tickOnlineTimer();
+  state.onlineTimerPollId = setInterval(tickOnlineTimer, 500);
+}
+
+function stopOnlineTimerPoll(){
+  if(state.onlineTimerPollId !== null){
+    clearInterval(state.onlineTimerPollId);
+    state.onlineTimerPollId = null;
+  }
+}
+
+function tickOnlineTimer(){
+  const room = state.room;
+  if(!room || room.status !== 'active' || !room.turnDeadline) return;
+
+  checkOnlineTimeout();
+  if(!state.room || state.room.status !== 'active') return; // may have just finished
+
+  const now = Date.now();
+  const activeRole = room.turn;
+  const inactiveRole = activeRole === 'host' ? 'guest' : 'host';
+  const activeRemaining = Math.max(0, Math.ceil((room.turnDeadline - now) / 1000));
+  const inactiveRemaining = Math.round(room.timeRemaining[inactiveRole]);
+
+  const hostRemaining = activeRole === 'host' ? activeRemaining : inactiveRemaining;
+  const guestRemaining = activeRole === 'guest' ? activeRemaining : inactiveRemaining;
+
+  el.chipP1Timer.textContent = formatTime(hostRemaining);
+  el.chipP1Timer.classList.toggle('time-low', hostRemaining <= 10);
+  el.chipP2Timer.textContent = formatTime(guestRemaining);
+  el.chipP2Timer.classList.toggle('time-low', guestRemaining <= 10);
+}
+
+/* Either device (the one whose turn it is, or the one waiting) can
+   report a timeout — whichever notices first. Harmless if both happen
+   to fire near-simultaneously: the update content would be identical. */
+function checkOnlineTimeout(){
+  const room = state.room;
+  if(!room || room.status !== 'active' || !room.turnDeadline) return;
+  if(Date.now() < room.turnDeadline) return;
+
+  const timedOutRole = room.turn;
+  submitRoomUpdate(state.roomCode, {
+    status: 'finished',
+    endReason: 'timeout',
+    timedOutRole,
+  }).catch(() => { /* if this device loses the race, the other device's report still lands */ });
+}
+
+function showOnlineWinnerModal(room){
+  stopOnlineTimerPoll();
+  el.gameScreen.classList.add('hidden');
+  el.winnerModal.classList.remove('hidden');
+
+  const hostP = room.players.host;
+  const guestP = room.players.guest;
+
+  if(room.endReason === 'timeout'){
+    const timedOutRole = room.timedOutRole;
+    const timedOutPlayer = timedOutRole === 'host' ? hostP : guestP;
+    const winner = timedOutRole === 'host' ? guestP : hostP;
+    el.winnerHeading.textContent = `${winner.name} wins on time!`;
+    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score}\n${guestP.name}: ${guestP.score}`;
+    return;
+  }
+
+  if(hostP.score === guestP.score){
+    el.winnerHeading.textContent = "It's a tie!";
+    el.winnerDetail.textContent = `${hostP.name} and ${guestP.name} both scored ${hostP.score}.`;
+  } else {
+    const winner = hostP.score > guestP.score ? hostP : guestP;
+    const loser = hostP.score > guestP.score ? guestP : hostP;
+    el.winnerHeading.textContent = `${winner.name} wins!`;
+    el.winnerDetail.textContent = `${winner.name}: ${winner.score}\n${loser.name}: ${loser.score}`;
   }
 }
 

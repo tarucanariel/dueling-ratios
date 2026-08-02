@@ -3,10 +3,19 @@
    Data model:
      /rooms/{code}/
        status: "waiting" | "active" | "finished"
-       settings: { allowedOps, totalPairs, allowNegatives }
+       endReason: "completed" | "timeout" (only once finished)
+       timedOutRole: "host" | "guest" (only if endReason is "timeout")
+       settings: { allowedOps, totalPairs, allowNegatives, timeControlSeconds }
        players: { host: {name,score}, guest?: {name,score} }
        turn: "host" | "guest"
        pairIndex, problem, cellIndex, pool
+       timeRemaining: { host: seconds, guest: seconds } — "banked" time for
+         whoever ISN'T currently active; the active player's true remaining
+         time is always computed fresh as (turnDeadline - now), never stored
+         as a ticking number, so the two devices can't drift apart.
+       turnDeadline: ms timestamp the current turn expires at (null until
+         the game actually starts, i.e. once a guest joins — not counted
+         down while the host is alone waiting for someone to join).
 
    Only `problem` (the {a,b,op,c,d} numbers) is synced, not the full
    derived board — buildProblemLayout() is a pure function, so both
@@ -29,7 +38,7 @@ function generateRoomCode(){
   return code;
 }
 
-/* settings: { allowedOps, totalPairs, allowNegatives } */
+/* settings: { allowedOps, totalPairs, allowNegatives, timeControlSeconds } */
 export async function createRoom(hostName, settings){
   await ensureSignedIn();
 
@@ -43,6 +52,7 @@ export async function createRoom(hostName, settings){
   const problem = generateProblem(settings);
   const layout = buildProblemLayout(problem);
   const pool = buildPool(layout.cells);
+  const t = settings.timeControlSeconds || 0;
 
   const roomData = {
     createdAt: Date.now(),
@@ -56,6 +66,8 @@ export async function createRoom(hostName, settings){
     problem,
     cellIndex: 0,
     pool,
+    timeRemaining: { host: t, guest: t },
+    turnDeadline: null, // set once the guest joins and the clock actually starts
   };
 
   await set(ref(db, 'rooms/' + code), roomData);
@@ -75,10 +87,18 @@ export async function joinRoom(code, guestName){
     throw new Error('This room already has two players.');
   }
 
-  await update(roomRef, {
+  const updates = {
     'players/guest': { name: guestName, score: 0 },
     status: 'active',
-  });
+  };
+
+  // Start the clock now — not at room creation, so the host waiting
+  // alone for someone to join doesn't silently burn their own time.
+  if(room.settings.timeControlSeconds > 0){
+    updates.turnDeadline = Date.now() + room.timeRemaining.host * 1000; // turn starts with host
+  }
+
+  await update(roomRef, updates);
 }
 
 /* Returns an unsubscribe function. */
