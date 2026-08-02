@@ -3,6 +3,7 @@ import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, submitRoomUpdate } from './online.js';
 import { ref, remove } from 'firebase/database';
 import { db } from './firebase.js';
+import { playSound } from './sounds.js';
 
 /* =========================================================
    AAT's Dueling Ratios — app logic
@@ -221,6 +222,7 @@ function tryStartGame(){
   el.setupModal.classList.add('hidden');
   el.gameScreen.classList.remove('hidden');
 
+  playSound('start');
   startNextPair();
   if(timerOn) startTimer();
 }
@@ -349,6 +351,7 @@ function onRoomUpdate(room){
     return;
   }
 
+  const prevRoom = state.room; // snapshot from before this update, used only for sound diffing below
   state.room = room;
   state.problem = room.problem;
   state.layout = buildProblemLayout(room.problem);
@@ -365,6 +368,16 @@ function onRoomUpdate(room){
     ? [{ name: hostP.name, score: hostP.score }, { name: guestP.name, score: guestP.score }]
     : [{ name: hostP.name, score: hostP.score }];
   state.currentPlayer = room.turn === 'host' ? 0 : 1;
+
+  // Shared milestone sounds: both devices receive this same update through
+  // their own listener, so diffing prev-vs-new here fires them identically
+  // for host and guest, regardless of which one triggered the change.
+  // (Correct/wrong sounds are handled separately, immediately, at the
+  // point of the click itself — see handleOnlineTileClick.)
+  const prevGuestPresent = !!prevRoom?.players?.guest;
+  if(!prevGuestPresent && guestP) playSound('start');
+  if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
+  if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
 
   if(!guestP){
     el.roomCodeDisplay.textContent = state.roomCode;
@@ -418,6 +431,7 @@ function handleOnlineTileClick(tileId){
   const updates = {};
 
   if(isCorrect){
+    playSound('correct');
     slotEls.forEach(slotEl => {
       slotEl.textContent = tile.value;
       slotEl.classList.remove('active', 'pending');
@@ -446,6 +460,7 @@ function handleOnlineTileClick(tileId){
       }
     }
   } else {
+    playSound('wrong');
     slotEls.forEach(slotEl => {
       slotEl.classList.add('drop-wrong');
       setTimeout(() => slotEl.classList.remove('drop-wrong'), 350);
@@ -522,6 +537,7 @@ function updateTimerDisplay(){
    player wins outright, regardless of score. In solo mode there's no
    opponent to award a win to, so it's just presented as time running out. */
 function handleTimeOut(playerIndex){
+  playSound('winner');
   el.gameScreen.classList.add('hidden');
   el.winnerModal.classList.remove('hidden');
 
@@ -543,6 +559,7 @@ function handleTimeOut(playerIndex){
 
 function startNextPair(){
   state.pairIndex++;
+  if(state.pairIndex > 1) playSound('next'); // the first pair is covered by the start sound instead
   state.problem = generateProblem({ allowedOps: state.allowedOps, allowNegatives: state.allowNegatives });
   state.layout = buildProblemLayout(state.problem);
   state.cells = state.layout.cells;
@@ -703,6 +720,7 @@ function handleTileClick(tileId){
   const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
 
   if(isCorrect){
+    playSound('correct');
     player.score += 1;
     state.pool.splice(tileIdx, 1); // consume the tile
     removeTileFromDOM(tile.id);
@@ -725,6 +743,7 @@ function handleTileClick(tileId){
     setTimeout(() => { renderProblem(); state.inputLocked = false; }, 250);
 
   } else {
+    playSound('wrong');
     player.score -= 1;
     // NOTE: wrong tiles stay in the pool. The same numeric value can be the
     // correct answer for more than one cell (e.g. denominators/cross terms
@@ -753,6 +772,7 @@ function advanceTurn(){
 
 function finishPair(){
   if(state.pairIndex >= state.totalPairs){
+    playSound('winner');
     showWinner();
   } else {
     startNextPair();
