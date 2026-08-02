@@ -4,6 +4,7 @@ import { createRoom, joinRoom, listenToRoom, submitRoomUpdate } from './online.j
 import { ref, remove } from 'firebase/database';
 import { db } from './firebase.js';
 import { playSound } from './sounds.js';
+import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 
 /* =========================================================
    AAT's Dueling Ratios — app logic
@@ -64,6 +65,10 @@ const el = {
   joinCodeInput: document.getElementById('join-code-input'),
 
   waitingModal: document.getElementById('waiting-modal'),
+  instructionsModal: document.getElementById('instructions-modal'),
+  instructionsBtn: document.getElementById('instructions-btn'),
+  closeInstructionsBtn: document.getElementById('close-instructions-btn'),
+  creditsPhoto: document.getElementById('credits-photo'),
   roomCodeDisplay: document.getElementById('room-code-display'),
   cancelWaitingBtn: document.getElementById('cancel-waiting-btn'),
 
@@ -99,6 +104,17 @@ el.modeOnline.addEventListener('click', () => selectMode('online'));
 el.startBtn.addEventListener('click', handlePrimaryButtonClick);
 el.playAgainBtn.addEventListener('click', resetToSetup);
 el.cancelWaitingBtn.addEventListener('click', cancelWaiting);
+
+el.instructionsBtn.addEventListener('click', () => {
+  el.instructionsModal.classList.remove('hidden');
+});
+el.closeInstructionsBtn.addEventListener('click', () => {
+  el.instructionsModal.classList.add('hidden');
+});
+el.instructionsModal.addEventListener('click', (e) => {
+  if(e.target === el.instructionsModal) el.instructionsModal.classList.add('hidden');
+});
+el.creditsPhoto.src = creditsPhotoUrl;
 
 el.onlineCreateBtn.addEventListener('click', () => selectOnlineChoice('create'));
 el.onlineJoinBtn.addEventListener('click', () => selectOnlineChoice('join'));
@@ -198,9 +214,9 @@ function tryStartGame(){
 
   state.timeControlSeconds = parseInt(el.timeControlSelect.value, 10);
 
-  state.players = [{ name: name1, score: 0, timeRemaining: state.timeControlSeconds }];
+  state.players = [{ name: name1, score: 0, timeRemaining: state.timeControlSeconds, correctCount: 0, wrongCount: 0 }];
   if(state.mode === 'vs'){
-    state.players.push({ name: name2, score: 0, timeRemaining: state.timeControlSeconds });
+    state.players.push({ name: name2, score: 0, timeRemaining: state.timeControlSeconds, correctCount: 0, wrongCount: 0 });
     el.chipP2.classList.remove('hidden');
   } else {
     el.chipP2.classList.add('hidden');
@@ -365,8 +381,11 @@ function onRoomUpdate(room){
   const hostP = room.players.host;
   const guestP = room.players.guest;
   state.players = guestP
-    ? [{ name: hostP.name, score: hostP.score }, { name: guestP.name, score: guestP.score }]
-    : [{ name: hostP.name, score: hostP.score }];
+    ? [
+        { name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount },
+        { name: guestP.name, score: guestP.score, correctCount: guestP.correctCount, wrongCount: guestP.wrongCount },
+      ]
+    : [{ name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount }];
   state.currentPlayer = room.turn === 'host' ? 0 : 1;
 
   // Shared milestone sounds: both devices receive this same update through
@@ -451,6 +470,7 @@ function handleOnlineTileClick(tileId){
     const newPool = state.pool.filter((_, i) => i !== tileIdx);
     const newCellIndex = state.cellIndex + 1;
     updates[`players/${myKey}/score`] = player.score + 1;
+    updates[`players/${myKey}/correctCount`] = (state.room.players[myKey].correctCount || 0) + 1;
     updates.pool = newPool;
     updates.cellIndex = newCellIndex;
     updates.turn = otherKey;
@@ -477,6 +497,7 @@ function handleOnlineTileClick(tileId){
     el.feedbackLine.className = 'feedback-line bad';
 
     updates[`players/${myKey}/score`] = player.score - 1;
+    updates[`players/${myKey}/wrongCount`] = (state.room.players[myKey].wrongCount || 0) + 1;
     updates.turn = otherKey;
   }
 
@@ -538,6 +559,17 @@ function formatTime(totalSeconds){
   return m + ':' + String(s).padStart(2, '0');
 }
 
+/* Accuracy = correct drops / total drops, as a whole-number percent.
+   Returns 'N/A' if the player never attempted a single drop (e.g. they
+   ran out of time before ever getting a turn), rather than a misleading 0%. */
+function formatAccuracy(player){
+  const correct = player.correctCount || 0;
+  const wrong = player.wrongCount || 0;
+  const total = correct + wrong;
+  if(total === 0) return 'N/A';
+  return Math.round((correct / total) * 100) + '%';
+}
+
 function updateTimerDisplay(){
   if(state.timeControlSeconds <= 0) return;
 
@@ -564,11 +596,11 @@ function handleTimeOut(playerIndex){
 
   if(state.mode === 'solo'){
     el.winnerHeading.textContent = "Time's up!";
-    el.winnerDetail.textContent = `${timedOutPlayer.name}, you ran out of time with a score of ${timedOutPlayer.score}.`;
+    el.winnerDetail.textContent = `${timedOutPlayer.name}, you ran out of time with a score of ${timedOutPlayer.score}.\nAccuracy: ${formatAccuracy(timedOutPlayer)}`;
   } else {
     const winner = state.players[playerIndex === 0 ? 1 : 0];
     el.winnerHeading.textContent = `${winner.name} wins on time!`;
-    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${state.players[0].name}: ${state.players[0].score}\n${state.players[1].name}: ${state.players[1].score}`;
+    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${state.players[0].name}: ${state.players[0].score} pts, ${formatAccuracy(state.players[0])} accuracy\n${state.players[1].name}: ${state.players[1].score} pts, ${formatAccuracy(state.players[1])} accuracy`;
   }
 }
 
@@ -644,7 +676,7 @@ function showOnlineWinnerModal(room){
     const timedOutPlayer = timedOutRole === 'host' ? hostP : guestP;
     const winner = timedOutRole === 'host' ? guestP : hostP;
     el.winnerHeading.textContent = `${winner.name} wins on time!`;
-    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score}\n${guestP.name}: ${guestP.score}`;
+    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score} pts, ${formatAccuracy(guestP)} accuracy`;
     return;
   }
 
@@ -658,16 +690,16 @@ function showOnlineWinnerModal(room){
       const winnerTime = hostTime > guestTime ? hostTime : guestTime;
       const loserTime = hostTime > guestTime ? guestTime : hostTime;
       el.winnerHeading.textContent = `${winner.name} wins the tiebreaker!`;
-      el.winnerDetail.textContent = `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(Math.round(winnerTime))} remaining\n${loser.name}: ${formatTime(Math.round(loserTime))} remaining`;
+      el.winnerDetail.textContent = `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(Math.round(winnerTime))} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${formatTime(Math.round(loserTime))} remaining, ${formatAccuracy(loser)} accuracy`;
     } else {
       el.winnerHeading.textContent = "It's a tie!";
-      el.winnerDetail.textContent = `${hostP.name} and ${guestP.name} both scored ${hostP.score}.`;
+      el.winnerDetail.textContent = `${hostP.name} and ${guestP.name} both scored ${hostP.score}.\n${hostP.name}: ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${formatAccuracy(guestP)} accuracy`;
     }
   } else {
     const winner = hostP.score > guestP.score ? hostP : guestP;
     const loser = hostP.score > guestP.score ? guestP : hostP;
     el.winnerHeading.textContent = `${winner.name} wins!`;
-    el.winnerDetail.textContent = `${winner.name}: ${winner.score}\n${loser.name}: ${loser.score}`;
+    el.winnerDetail.textContent = `${winner.name}: ${winner.score} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score} pts, ${formatAccuracy(loser)} accuracy`;
   }
 }
 
@@ -840,6 +872,7 @@ function handleTileClick(tileId){
   if(isCorrect){
     playSound('correct');
     player.score += 1;
+    player.correctCount += 1;
     state.pool.splice(tileIdx, 1); // consume the tile
     removeTileFromDOM(tile.id);
     slotEls.forEach(slotEl => {
@@ -863,6 +896,7 @@ function handleTileClick(tileId){
   } else {
     playSound('wrong');
     player.score -= 1;
+    player.wrongCount += 1;
     // NOTE: wrong tiles stay in the pool. The same numeric value can be the
     // correct answer for more than one cell (e.g. denominators/cross terms
     // that repeat), so removing a tile just because it was wrong here could
@@ -909,7 +943,7 @@ function showWinner(){
   if(state.mode === 'solo'){
     const p = state.players[0];
     el.winnerHeading.textContent = 'Nice work!';
-    el.winnerDetail.textContent = `${p.name}, you finished with a score of ${p.score}.`;
+    el.winnerDetail.textContent = `${p.name}, you finished with a score of ${p.score}.\nAccuracy: ${formatAccuracy(p)}`;
   } else {
     const [p1, p2] = state.players;
     let heading, detail;
@@ -919,16 +953,16 @@ function showWinner(){
         const winner = p1.timeRemaining > p2.timeRemaining ? p1 : p2;
         const loser = p1.timeRemaining > p2.timeRemaining ? p2 : p1;
         heading = `${winner.name} wins the tiebreaker!`;
-        detail = `Tied at ${p1.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(winner.timeRemaining)} remaining\n${loser.name}: ${formatTime(loser.timeRemaining)} remaining`;
+        detail = `Tied at ${p1.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(winner.timeRemaining)} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${formatTime(loser.timeRemaining)} remaining, ${formatAccuracy(loser)} accuracy`;
       } else {
         heading = "It's a tie!";
-        detail = `${p1.name} and ${p2.name} both scored ${p1.score}.`;
+        detail = `${p1.name} and ${p2.name} both scored ${p1.score}.\n${p1.name}: ${formatAccuracy(p1)} accuracy\n${p2.name}: ${formatAccuracy(p2)} accuracy`;
       }
     } else {
       const winner = p1.score > p2.score ? p1 : p2;
       const loser = p1.score > p2.score ? p2 : p1;
       heading = `${winner.name} wins!`;
-      detail = `${winner.name}: ${winner.score}\n${loser.name}: ${loser.score}`;
+      detail = `${winner.name}: ${winner.score} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score} pts, ${formatAccuracy(loser)} accuracy`;
     }
     el.winnerHeading.textContent = heading;
     el.winnerDetail.textContent = detail;

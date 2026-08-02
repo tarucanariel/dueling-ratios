@@ -14,6 +14,7 @@
   <div class="modal chalk-panel">
     <h1 class="game-title">AAT's Dueling Ratios</h1>
     <p class="subtitle">Solve the fraction, one slot at a time.</p>
+    <button class="text-link-btn" id="instructions-btn" type="button">&#128214; Instructions</button>
 
     <div class="setup-step" id="step-name1">
       <label for="player1-name">Your name</label>
@@ -106,6 +107,70 @@
 
     <button class="primary-btn hidden" id="start-game-btn">Start Game</button>
     <p class="setup-error" id="setup-error"></p>
+  </div>
+</div>
+
+<!-- Instructions / manual -->
+<div class="modal-overlay hidden" id="instructions-modal">
+  <div class="modal chalk-panel instructions-panel">
+    <div class="instructions-header">
+      <h2 class="modal-heading">How to Play</h2>
+      <button class="close-btn" id="close-instructions-btn" aria-label="Close instructions" type="button">&times;</button>
+    </div>
+
+    <div class="instructions-body">
+      <h3>Objective</h3>
+      <p>AAT's Dueling Ratios helps you practice fraction (and, optionally, integer) arithmetic — addition, subtraction, multiplication, and division — by working through each problem step by step, the same way you would on paper.</p>
+
+      <h3>Game Modes</h3>
+      <ul>
+        <li><strong>Solo</strong> — practice on your own, at your own pace.</li>
+        <li><strong>Same Device</strong> — two players take turns on one screen.</li>
+        <li><strong>Online</strong> — challenge someone on a different device using a shareable room code.</li>
+      </ul>
+
+      <h3>How to Solve a Problem</h3>
+      <p>Each problem is broken into a series of steps, shown as empty boxes. One box glows at a time — that's the one asking for an answer. Tap the matching number from the pool to fill it in. A correct answer earns a point and moves you to the next step; a wrong answer costs a point, but the same box stays open to try again.</p>
+      <p>The steps look a little different depending on the operation:</p>
+      <ul>
+        <li><strong>Similar fractions</strong> (same denominator) — add or subtract the numerators directly.</li>
+        <li><strong>Dissimilar fractions</strong> (different denominators) — first find the Lowest Common Denominator (LCD), convert each fraction, then combine them.</li>
+        <li><strong>Multiplication</strong> — multiply straight across: numerators together, denominators together.</li>
+        <li><strong>Division</strong> — flip the second fraction, then multiply.</li>
+      </ul>
+      <p>If the result can be simplified, you'll get one more step to reduce it — and if it simplifies all the way to a whole number, you'll enter just that one number instead of a fraction.</p>
+
+      <h3>Scoring</h3>
+      <p>Every correct answer is worth +1 point; every wrong guess costs -1 point. Whichever player has the higher score once all the fraction pairs are solved wins the game.</p>
+
+      <h3>Setup Options</h3>
+      <ul>
+        <li><strong>Operations</strong> — choose which operations to practice, or select all of them.</li>
+        <li><strong>Allow negatives</strong> — turns on negative numbers, adding integer sign rules to the practice.</li>
+        <li><strong>Number of fractions</strong> — how many problems to solve in one game (1–5).</li>
+        <li><strong>Time control</strong> — an optional shared clock. Each player's time only counts down on their own turn, and running out of time ends the game immediately.</li>
+      </ul>
+
+      <h3>Tiebreakers</h3>
+      <p>If both players finish with the same score, whoever has more time remaining wins the tiebreaker — but only if a timer was turned on. Without a timer, a tied score stays a tie.</p>
+
+      <h3>Playing Online</h3>
+      <p>One player creates a game and receives a short room code; the other player enters that code to join. Once both players are in, the game begins automatically for both of you at the same time.</p>
+    </div>
+
+    <div class="credits">
+      <img
+        id="credits-photo"
+        class="credits-photo"
+        alt="Ariel A. Tarucan"
+        src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><rect width='96' height='96' fill='%23150f36'/><text x='48' y='55' font-family='Inter,sans-serif' font-size='26' font-weight='700' fill='%2300d2ff' text-anchor='middle'>AAT</text></svg>"
+      >
+      <div class="credits-text">
+        <p class="credits-name"><strong>Game created by:</strong> Ariel A. Tarucan</p>
+        <p class="credits-title">Teacher III, Esperanza Senior High School</p>
+        <p class="credits-disclaimer">This game was created for educational and research purposes only.</p>
+      </div>
+    </div>
   </div>
 </div>
 
