@@ -159,8 +159,8 @@ export function buildDivisionLayout(problem){
   const resultNum = a * d;
 
   const cells = [
-    { key: 'crossA',    label: 'a', correct: a },
-    { key: 'crossB',    label: 'b', correct: b },
+    { key: 'crossA',    label: 'numerator of fraction 1', correct: a },
+    { key: 'crossB',    label: 'denominator of fraction 1', correct: b },
     { key: 'flipNum',   label: 'flipped numerator', correct: d },
     { key: 'flipDen',   label: 'flipped denominator', correct: c },
     { key: 'resultNum', label: 'result numerator', correct: resultNum },
@@ -210,9 +210,9 @@ export function buildDissimilarAddSubLayout(problem){
   const cells = [
     { key: 'lcd',      label: 'LCD', correct: lcd },
     { key: 'mult1',    label: 'multiplier for fraction 1', correct: mult1 },
-    { key: 'restateA', label: 'a', correct: a },
+    { key: 'restateA', label: 'numerator of fraction 1', correct: a },
     { key: 'mult2',    label: 'multiplier for fraction 2', correct: mult2 },
-    { key: 'restateC', label: 'c', correct: c },
+    { key: 'restateC', label: 'numerator of fraction 2', correct: c },
     { key: 'convNum1', label: 'converted numerator 1', correct: convNum1 },
     { key: 'convNum2', label: 'converted numerator 2', correct: convNum2 },
     { key: 'resultNum',label: 'result numerator', correct: resultNum },
