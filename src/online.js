@@ -59,7 +59,7 @@ export async function createRoom(hostName, settings){
     status: 'waiting',
     settings,
     players: {
-      host: { name: hostName, score: 0 },
+      host: { name: hostName, score: 0, correctCount: 0, wrongCount: 0 },
     },
     turn: 'host',
     pairIndex: 1,
@@ -68,6 +68,7 @@ export async function createRoom(hostName, settings){
     pool,
     timeRemaining: { host: t, guest: t },
     turnDeadline: null, // set once the guest joins and the clock actually starts
+    missLog: [],
   };
 
   await set(ref(db, 'rooms/' + code), roomData);
@@ -88,7 +89,7 @@ export async function joinRoom(code, guestName){
   }
 
   const updates = {
-    'players/guest': { name: guestName, score: 0 },
+    'players/guest': { name: guestName, score: 0, correctCount: 0, wrongCount: 0 },
     status: 'active',
   };
 

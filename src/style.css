@@ -254,6 +254,27 @@ body{
 }
 .primary-btn:active{ transform:scale(0.98); }
 
+.secondary-btn{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border-radius:var(--radius);
+  border:1px solid var(--line);
+  background:rgba(138,43,226,0.1);
+  color:var(--chalk);
+  font-weight:600;
+  font-size:0.9rem;
+  text-transform:uppercase;
+  letter-spacing:0.03em;
+  cursor:pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.secondary-btn:hover{
+  border-color:var(--amber);
+  background:rgba(0,210,255,0.1);
+}
+
 .setup-error{
   color:var(--bad);
   font-size:0.85rem;
@@ -343,6 +364,76 @@ body{
 
 .instructions-body li{ margin-bottom:6px; }
 .instructions-body strong{ color:var(--chalk); }
+
+.review-summary{
+  color:var(--chalk-dim);
+  font-size:0.85rem;
+  margin:0 0 14px;
+}
+
+.review-list{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.miss-card{
+  background:var(--slate);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:12px 14px;
+}
+
+.miss-problem{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:10px;
+  padding-bottom:8px;
+  border-bottom:1px dashed var(--line);
+}
+
+.miss-problem .fraction-block{ font-size:1.15rem; }
+.miss-problem .operator-symbol{ font-size:1.3rem; }
+
+.miss-step-line{
+  font-size:0.82rem;
+  margin-bottom:6px;
+}
+
+.miss-step-line:last-child{ margin-bottom:0; }
+
+.miss-label{
+  color:var(--amber);
+  text-transform:uppercase;
+  letter-spacing:0.03em;
+  font-size:0.7rem;
+  display:block;
+  margin-bottom:2px;
+}
+
+.miss-values{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  flex-wrap:wrap;
+}
+
+.miss-wrong{ color:var(--bad); }
+.miss-correct{ color:var(--good); }
+
+.miss-player-tag{
+  font-size:0.68rem;
+  text-transform:uppercase;
+  letter-spacing:0.03em;
+  background:rgba(138,43,226,0.18);
+  color:var(--secondary);
+  padding:2px 8px;
+  border-radius:10px;
+  margin-left:auto;
+}
+
+
 
 .credits{
   display:flex;

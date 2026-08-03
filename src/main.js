@@ -33,6 +33,7 @@ const state = {
   myRole: null,          // 'host' | 'guest'
   unsubscribeRoom: null,
   onlineTimerPollId: null, // setInterval handle for the online chess-clock poll
+  missLog: [], // wrong-attempt records for the current game, for the post-game review
 };
 
 /* ---------- DOM refs ---------- */
@@ -92,6 +93,11 @@ const el = {
   winnerHeading: document.getElementById('winner-heading'),
   winnerDetail: document.getElementById('winner-detail'),
   playAgainBtn: document.getElementById('play-again-btn'),
+  reviewMissedBtn: document.getElementById('review-missed-btn'),
+  reviewModal: document.getElementById('review-modal'),
+  closeReviewBtn: document.getElementById('close-review-btn'),
+  reviewSummary: document.getElementById('review-summary'),
+  reviewList: document.getElementById('review-list'),
 };
 
 /* =========================================================
@@ -115,6 +121,17 @@ el.instructionsModal.addEventListener('click', (e) => {
   if(e.target === el.instructionsModal) el.instructionsModal.classList.add('hidden');
 });
 el.creditsPhoto.src = creditsPhotoUrl;
+
+el.reviewMissedBtn.addEventListener('click', () => {
+  renderMissedReview();
+  el.reviewModal.classList.remove('hidden');
+});
+el.closeReviewBtn.addEventListener('click', () => {
+  el.reviewModal.classList.add('hidden');
+});
+el.reviewModal.addEventListener('click', (e) => {
+  if(e.target === el.reviewModal) el.reviewModal.classList.add('hidden');
+});
 
 el.onlineCreateBtn.addEventListener('click', () => selectOnlineChoice('create'));
 el.onlineJoinBtn.addEventListener('click', () => selectOnlineChoice('join'));
@@ -188,6 +205,7 @@ function handlePrimaryButtonClick(){
 }
 
 function tryStartGame(){
+  state.missLog = [];
   const name1 = el.player1Name.value.trim();
   const name2 = el.player2Name.value.trim();
 
@@ -244,6 +262,8 @@ function tryStartGame(){
 function resetToSetup(){
   stopTimer();
   leaveOnlineRoom();
+  state.missLog = [];
+  el.reviewModal.classList.add('hidden');
   el.winnerModal.classList.add('hidden');
   el.waitingModal.classList.add('hidden');
   el.gameScreen.classList.add('hidden');
@@ -375,6 +395,7 @@ function onRoomUpdate(room){
   state.cellIndex = room.cellIndex;
   state.pool = room.pool || [];
   state.pairIndex = room.pairIndex;
+  state.missLog = room.missLog || [];
   state.totalPairs = room.settings.totalPairs;
   state.mode = 'vs'; // reuse the existing two-player rendering paths
 
@@ -501,6 +522,17 @@ function handleOnlineTileClick(tileId){
 
     updates[`players/${myKey}/score`] = player.score - 1;
     updates[`players/${myKey}/wrongCount`] = (state.room.players[myKey].wrongCount || 0) + 1;
+    updates.missLog = [
+      ...(state.room.missLog || []),
+      {
+        pairIndex: state.pairIndex,
+        problem: { ...state.problem },
+        cellLabel: activeCell.label,
+        attempted: tile.value,
+        correct: activeCell.correct,
+        playerName: player.name,
+      },
+    ];
     updates.turn = otherKey;
   }
 
@@ -594,6 +626,7 @@ function handleTimeOut(playerIndex){
   playSound('winner');
   el.gameScreen.classList.add('hidden');
   el.winnerModal.classList.remove('hidden');
+  el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);
 
   const timedOutPlayer = state.players[playerIndex];
 
@@ -670,6 +703,7 @@ function showOnlineWinnerModal(room){
   stopOnlineTimerPoll();
   el.gameScreen.classList.add('hidden');
   el.winnerModal.classList.remove('hidden');
+  el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);
 
   const hostP = room.players.host;
   const guestP = room.players.guest;
@@ -948,6 +982,14 @@ function handleTileClick(tileId){
     animateTileThrow(tileEl, slotEls[0], 'wrong');
     player.score -= 1;
     player.wrongCount += 1;
+    state.missLog.push({
+      pairIndex: state.pairIndex,
+      problem: { ...state.problem },
+      cellLabel: activeCell.label,
+      attempted: tile.value,
+      correct: activeCell.correct,
+      playerName: player.name,
+    });
     // NOTE: wrong tiles stay in the pool. The same numeric value can be the
     // correct answer for more than one cell (e.g. denominators/cross terms
     // that repeat), so removing a tile just because it was wrong here could
@@ -986,10 +1028,54 @@ function finishPair(){
    Winner modal
    ========================================================= */
 
+/* Groups state.missLog (one entry per wrong drop) by which fraction pair
+   it happened in, and renders one card per problem that had at least one
+   mistake — reusing fracHTML so the problem itself renders exactly like
+   it did on the real board. */
+function renderMissedReview(){
+  if(state.missLog.length === 0){
+    el.reviewSummary.textContent = 'No missed steps — perfect game!';
+    el.reviewList.innerHTML = '';
+    return;
+  }
+
+  const groups = new Map();
+  state.missLog.forEach(entry => {
+    if(!groups.has(entry.pairIndex)) groups.set(entry.pairIndex, []);
+    groups.get(entry.pairIndex).push(entry);
+  });
+
+  const problemCount = groups.size;
+  const stepWord = state.missLog.length === 1 ? 'step' : 'steps';
+  const problemWord = problemCount === 1 ? 'problem' : 'problems';
+  el.reviewSummary.textContent = `${state.missLog.length} missed ${stepWord} across ${problemCount} ${problemWord}.`;
+
+  const showPlayerTags = state.players.length > 1;
+
+  let html = '';
+  groups.forEach((entries) => {
+    const { a, b, op, c, d } = entries[0].problem;
+    html += `<div class="miss-card">`;
+    html += `<div class="miss-problem">${fracHTML(a, b)}<span class="operator-symbol">${op}</span>${fracHTML(c, d)}</div>`;
+    entries.forEach(entry => {
+      html += `<div class="miss-step-line">`;
+      html += `<span class="miss-label">${entry.cellLabel}</span>`;
+      html += `<div class="miss-values">`;
+      html += `<span class="miss-wrong">You answered ${entry.attempted}</span>`;
+      html += `<span class="miss-correct">Correct: ${entry.correct}</span>`;
+      if(showPlayerTags) html += `<span class="miss-player-tag">${entry.playerName}</span>`;
+      html += `</div></div>`;
+    });
+    html += `</div>`;
+  });
+  el.reviewList.innerHTML = html;
+}
+
 function showWinner(){
   stopTimer();
   el.gameScreen.classList.add('hidden');
   el.winnerModal.classList.remove('hidden');
+  el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);
 
   if(state.mode === 'solo'){
     const p = state.players[0];

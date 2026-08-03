@@ -227,7 +227,20 @@
   <div class="modal chalk-panel">
     <h2 id="winner-heading">Game Over</h2>
     <p id="winner-detail"></p>
+    <button class="secondary-btn hidden" id="review-missed-btn" type="button">Review Missed Problems</button>
     <button class="primary-btn" id="play-again-btn">Play Again</button>
+  </div>
+</div>
+
+<!-- Missed problems review -->
+<div class="modal-overlay hidden" id="review-modal">
+  <div class="modal chalk-panel instructions-panel">
+    <div class="instructions-header">
+      <h2 class="modal-heading">Missed Problems</h2>
+      <button class="close-btn" id="close-review-btn" aria-label="Close" type="button">&times;</button>
+    </div>
+    <p class="review-summary" id="review-summary"></p>
+    <div class="review-list" id="review-list"></div>
   </div>
 </div>
 
