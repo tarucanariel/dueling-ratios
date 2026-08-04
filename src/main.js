@@ -328,6 +328,8 @@ function resetToSetup(){
   el.rematchBtn.disabled = false;
   el.rematchStatus.classList.add('hidden');
   el.rematchStatus.textContent = '';
+  el.feedbackLine.textContent = '';
+  el.feedbackLine.className = 'feedback-line';
   state.mode = null;
   state.onlineChoice = null;
   el.modeSolo.classList.remove('selected');
@@ -480,6 +482,15 @@ function onRoomUpdate(room){
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
 
+  // A fresh game — either the very first one, or a rematch restarting a
+  // finished room — must not carry over the previous game's last "Correct!
+  // X +1" / "Not quite. X -1" message into the new board.
+  const isFreshGameStart = (!prevGuestPresent && guestP) || (prevRoom && prevRoom.status === 'finished' && room.status !== 'finished');
+  if(isFreshGameStart){
+    el.feedbackLine.textContent = '';
+    el.feedbackLine.className = 'feedback-line';
+  }
+
   if(!guestP){
     el.roomCodeDisplay.textContent = state.roomCode;
     el.setupModal.classList.add('hidden');
@@ -519,7 +530,7 @@ function onRoomUpdate(room){
   // Reached once status is 'active' — including the moment a confirmed
   // rematch flips it back from 'finished', so make sure the winner modal
   // and its rematch UI don't linger on top of the fresh game screen.
-  if(!el.winnerModal.classList.contains('hidden')){
+  if(isFreshGameStart && prevRoom?.status === 'finished'){
     playSound('start');
   }
   el.winnerModal.classList.add('hidden');
