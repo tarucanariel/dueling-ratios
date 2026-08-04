@@ -1,6 +1,6 @@
 import './style.css';
 import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
-import { createRoom, joinRoom, listenToRoom, submitRoomUpdate } from './online.js';
+import { createRoom, joinRoom, listenToRoom, submitRoomUpdate, requestRematch, resetRoomForRematch } from './online.js';
 import { ref, remove } from 'firebase/database';
 import { db } from './firebase.js';
 import { playSound } from './sounds.js';
@@ -34,6 +34,7 @@ const state = {
   unsubscribeRoom: null,
   onlineTimerPollId: null, // setInterval handle for the online chess-clock poll
   missLog: [], // wrong-attempt records for the current game, for the post-game review
+  rematchFinalizing: false, // guards against the host double-triggering resetRoomForRematch
 };
 
 /* ---------- DOM refs ---------- */
@@ -92,7 +93,9 @@ const el = {
   winnerModal: document.getElementById('winner-modal'),
   winnerHeading: document.getElementById('winner-heading'),
   winnerDetail: document.getElementById('winner-detail'),
-  playAgainBtn: document.getElementById('play-again-btn'),
+  rematchBtn: document.getElementById('rematch-btn'),
+  newGameBtn: document.getElementById('new-game-btn'),
+  rematchStatus: document.getElementById('rematch-status'),
   reviewMissedBtn: document.getElementById('review-missed-btn'),
   reviewModal: document.getElementById('review-modal'),
   closeReviewBtn: document.getElementById('close-review-btn'),
@@ -108,7 +111,8 @@ el.modeSolo.addEventListener('click', () => selectMode('solo'));
 el.modeVs.addEventListener('click', () => selectMode('vs'));
 el.modeOnline.addEventListener('click', () => selectMode('online'));
 el.startBtn.addEventListener('click', handlePrimaryButtonClick);
-el.playAgainBtn.addEventListener('click', resetToSetup);
+el.rematchBtn.addEventListener('click', handleRematchClick);
+el.newGameBtn.addEventListener('click', resetToSetup);
 el.cancelWaitingBtn.addEventListener('click', cancelWaiting);
 
 el.instructionsBtn.addEventListener('click', () => {
@@ -263,12 +267,16 @@ function resetToSetup(){
   stopTimer();
   leaveOnlineRoom();
   state.missLog = [];
+  state.rematchFinalizing = false;
   el.reviewModal.classList.add('hidden');
   el.winnerModal.classList.add('hidden');
   el.waitingModal.classList.add('hidden');
   el.gameScreen.classList.add('hidden');
   el.setupModal.classList.remove('hidden');
   el.setupError.textContent = '';
+  el.rematchBtn.disabled = false;
+  el.rematchStatus.classList.add('hidden');
+  el.rematchStatus.textContent = '';
   state.mode = null;
   state.onlineChoice = null;
   el.modeSolo.classList.remove('selected');
@@ -293,6 +301,8 @@ function leaveOnlineRoom(){
   state.isOnline = false;
   state.roomCode = null;
   state.myRole = null;
+  state.room = null;
+  state.rematchFinalizing = false;
 }
 
 async function cancelWaiting(){
@@ -440,8 +450,32 @@ function onRoomUpdate(room){
 
   if(room.status === 'finished'){
     showOnlineWinnerModal(room);
+    updateRematchUI(room);
+
+    // Only the host actually restarts the room, so two devices seeing
+    // "both accepted" at once can't race each other into resetting it twice.
+    const rematch = room.rematch || {};
+    if(rematch.host && rematch.guest && state.myRole === 'host' && !state.rematchFinalizing){
+      state.rematchFinalizing = true;
+      resetRoomForRematch(state.roomCode, room.settings).catch(err => {
+        console.error('Failed to start rematch:', err);
+        state.rematchFinalizing = false;
+      });
+    }
     return;
   }
+
+  // Reached once status is 'active' — including the moment a confirmed
+  // rematch flips it back from 'finished', so make sure the winner modal
+  // and its rematch UI don't linger on top of the fresh game screen.
+  if(!el.winnerModal.classList.contains('hidden')){
+    playSound('start');
+  }
+  el.winnerModal.classList.add('hidden');
+  el.rematchStatus.classList.add('hidden');
+  el.rematchStatus.textContent = '';
+  el.rematchBtn.disabled = false;
+  state.rematchFinalizing = false;
 
   if(timerOn){
     if(!state.onlineTimerPollId) startOnlineTimerPoll();
@@ -627,6 +661,9 @@ function handleTimeOut(playerIndex){
   el.gameScreen.classList.add('hidden');
   el.winnerModal.classList.remove('hidden');
   el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);
+  el.rematchStatus.classList.add('hidden');
+  el.rematchStatus.textContent = '';
+  el.rematchBtn.disabled = false;
 
   const timedOutPlayer = state.players[playerIndex];
 
@@ -737,6 +774,69 @@ function showOnlineWinnerModal(room){
     const loser = hostP.score > guestP.score ? guestP : hostP;
     el.winnerHeading.textContent = `${winner.name} wins!`;
     el.winnerDetail.textContent = `${winner.name}: ${winner.score} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score} pts, ${formatAccuracy(loser)} accuracy`;
+  }
+}
+
+/* Renders the accept/waiting/incoming states for the online rematch
+   flow. room.rematch is {host: bool, guest: bool}; only present once
+   a game has finished at least once, so it may be absent entirely. */
+function updateRematchUI(room){
+  const rematch = room.rematch || { host: false, guest: false };
+  const myFlag = rematch[state.myRole];
+  const otherRole = state.myRole === 'host' ? 'guest' : 'host';
+  const otherFlag = rematch[otherRole];
+  const otherPlayer = otherRole === 'host' ? room.players.host : room.players.guest;
+
+  el.rematchBtn.disabled = myFlag;
+  el.rematchStatus.classList.remove('hidden');
+
+  if(myFlag && otherFlag){
+    el.rematchStatus.textContent = 'Both ready — starting rematch...';
+  } else if(myFlag && !otherFlag){
+    el.rematchStatus.textContent = 'Waiting for opponent to accept...';
+  } else if(!myFlag && otherFlag){
+    el.rematchStatus.textContent = `${otherPlayer.name} wants a rematch!`;
+  } else {
+    el.rematchStatus.classList.add('hidden');
+    el.rematchStatus.textContent = '';
+  }
+}
+
+/* Play Again, for local modes: same players, names, and settings,
+   just a clean scoreboard and a fresh first pair. */
+function rematchLocal(){
+  el.winnerModal.classList.add('hidden');
+  el.reviewModal.classList.add('hidden');
+  state.missLog = [];
+  state.pairIndex = 0;
+  state.currentPlayer = 0;
+  state.players.forEach(p => {
+    p.score = 0;
+    p.correctCount = 0;
+    p.wrongCount = 0;
+    p.timeRemaining = state.timeControlSeconds;
+  });
+  updateScoreChips();
+
+  const timerOn = state.timeControlSeconds > 0;
+  el.chipP1Timer.classList.toggle('hidden', !timerOn);
+  el.chipP2Timer.classList.toggle('hidden', !timerOn || state.mode !== 'vs');
+
+  el.gameScreen.classList.remove('hidden');
+  playSound('start');
+  startNextPair();
+  if(timerOn) startTimer();
+}
+
+function handleRematchClick(){
+  if(state.isOnline){
+    el.rematchBtn.disabled = true;
+    requestRematch(state.roomCode, state.myRole).catch(err => {
+      console.error('Failed to request rematch:', err);
+      el.rematchBtn.disabled = false;
+    });
+  } else {
+    rematchLocal();
   }
 }
 
@@ -1076,6 +1176,9 @@ function showWinner(){
   el.gameScreen.classList.add('hidden');
   el.winnerModal.classList.remove('hidden');
   el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);
+  el.rematchStatus.classList.add('hidden');
+  el.rematchStatus.textContent = '';
+  el.rematchBtn.disabled = false;
 
   if(state.mode === 'solo'){
     const p = state.players[0];

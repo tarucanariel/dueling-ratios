@@ -875,6 +875,21 @@ body{
   white-space:pre-line;
 }
 
+.rematch-status{
+  color:var(--amber);
+  font-size:0.85rem;
+  font-weight:600;
+  margin:0 0 10px;
+  min-height:1.2em;
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled{
+  opacity:0.5;
+  cursor:not-allowed;
+  transform:none;
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 520px){
   body{ padding:10px; }

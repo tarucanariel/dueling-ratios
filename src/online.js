@@ -113,3 +113,44 @@ export function listenToRoom(code, callback){
 export function submitRoomUpdate(code, updates){
   return update(ref(db, 'rooms/' + code), updates);
 }
+
+/* Opt-in rematch: each player flips their own flag. Once both flags are
+   true, resetRoomForRematch() actually restarts the room (see main.js,
+   which has exactly one device — the host — do that, to avoid both
+   players racing to reset the same room at once). */
+export function requestRematch(code, role){
+  return update(ref(db, 'rooms/' + code), { [`rematch/${role}`]: true });
+}
+
+/* Restarts a finished room in place: fresh problem/pool, scores and
+   clocks reset, rematch flags cleared. Reuses the room's original
+   settings, so a rematch always matches the game that was just played. */
+export async function resetRoomForRematch(code, settings){
+  const problem = generateProblem(settings);
+  const layout = buildProblemLayout(problem);
+  const pool = buildPool(layout.cells);
+  const t = settings.timeControlSeconds || 0;
+
+  const updates = {
+    status: 'active',
+    endReason: null,
+    timedOutRole: null,
+    'players/host/score': 0,
+    'players/host/correctCount': 0,
+    'players/host/wrongCount': 0,
+    'players/guest/score': 0,
+    'players/guest/correctCount': 0,
+    'players/guest/wrongCount': 0,
+    turn: 'host',
+    pairIndex: 1,
+    problem,
+    cellIndex: 0,
+    pool,
+    timeRemaining: { host: t, guest: t },
+    turnDeadline: t > 0 ? Date.now() + t * 1000 : null,
+    missLog: [],
+    rematch: { host: false, guest: false },
+  };
+
+  await update(ref(db, 'rooms/' + code), updates);
+}
