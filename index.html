@@ -14,7 +14,10 @@
   <div class="modal chalk-panel">
     <h1 class="game-title">AAT's Dueling Ratios</h1>
     <p class="subtitle">Solve the fraction, one slot at a time.</p>
-    <button class="text-link-btn" id="instructions-btn" type="button">&#128214; Instructions</button>
+    <div class="setup-links-row">
+      <button class="text-link-btn" id="instructions-btn" type="button">&#128214; Instructions</button>
+      <button class="text-link-btn" id="watch-games-btn" type="button">&#128065; Watch Games</button>
+    </div>
 
     <div class="setup-step" id="step-name1">
       <label for="player1-name">Your name</label>
@@ -174,6 +177,33 @@
   </div>
 </div>
 
+<!-- Teacher: PIN gate for the watch list -->
+<div class="modal-overlay hidden" id="teacher-pin-modal">
+  <div class="modal chalk-panel">
+    <h2 class="game-title" style="font-size:1.6rem;">Watch Games</h2>
+    <p class="subtitle">Enter the teacher PIN to view ongoing online games.</p>
+    <div class="setup-step">
+      <label for="teacher-pin-input">Teacher PIN</label>
+      <input type="password" inputmode="numeric" id="teacher-pin-input" maxlength="8" placeholder="PIN" autocomplete="off" class="code-input">
+    </div>
+    <p class="setup-error" id="teacher-pin-error"></p>
+    <button class="primary-btn" id="teacher-pin-submit-btn" type="button">Unlock</button>
+    <button class="secondary-btn" id="teacher-pin-cancel-btn" type="button">Cancel</button>
+  </div>
+</div>
+
+<!-- Teacher: list of ongoing online games -->
+<div class="modal-overlay hidden" id="watch-list-modal">
+  <div class="modal chalk-panel instructions-panel">
+    <div class="instructions-header">
+      <h2 class="modal-heading">Ongoing Games</h2>
+      <button class="close-btn" id="close-watch-list-btn" aria-label="Close" type="button">&times;</button>
+    </div>
+    <p class="subtitle" style="margin-bottom:14px;">Only Online games can be watched — Solo and Same Device games don't leave this device.</p>
+    <div class="watch-list-body" id="watch-list-body"></div>
+  </div>
+</div>
+
 <!-- Online: waiting for opponent -->
 <div class="modal-overlay hidden" id="waiting-modal">
   <div class="modal chalk-panel">
@@ -187,6 +217,14 @@
 
 <!-- Main game screen -->
 <div class="game-wrap hidden" id="game-screen">
+
+  <div class="spectate-bar hidden" id="spectate-bar">
+    <span>&#128065; Spectating room <strong id="spectate-room-code">----</strong></span>
+    <div class="spectate-bar-actions">
+      <button class="text-link-btn" id="spectate-back-btn" type="button">Back to list</button>
+      <button class="text-link-btn" id="spectate-exit-btn" type="button">Exit</button>
+    </div>
+  </div>
 
   <header class="score-bar">
     <div class="player-chip player-one" id="chip-p1">
@@ -216,7 +254,7 @@
     </div>
 
     <aside class="pool-sidebar">
-      <div class="pool-label">Tap a number for the glowing slot</div>
+      <div class="pool-label" id="pool-label">Tap a number for the glowing slot</div>
       <div class="pool-tray" id="pool-tray"></div>
     </aside>
   </main>

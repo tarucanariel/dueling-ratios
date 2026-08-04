@@ -1,6 +1,7 @@
 import './style.css';
 import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
-import { createRoom, joinRoom, listenToRoom, submitRoomUpdate, requestRematch, resetRoomForRematch } from './online.js';
+import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale } from './online.js';
+import { TEACHER_PIN } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
 import { db } from './firebase.js';
 import { playSound } from './sounds.js';
@@ -35,6 +36,14 @@ const state = {
   onlineTimerPollId: null, // setInterval handle for the online chess-clock poll
   missLog: [], // wrong-attempt records for the current game, for the post-game review
   rematchFinalizing: false, // guards against the host double-triggering resetRoomForRematch
+
+  // Teacher spectator view
+  spectating: false,         // true while watching someone else's online game, read-only
+  spectateRoomCode: null,
+  spectateRoom: null,        // last-seen snapshot of the watched room, for prev-vs-new diffing
+  unsubscribeSpectateRoom: null,
+  unsubscribeRoomsList: null,
+  spectateTimerId: null,     // display-only poll; never writes to the room
 };
 
 /* ---------- DOM refs ---------- */
@@ -101,6 +110,22 @@ const el = {
   closeReviewBtn: document.getElementById('close-review-btn'),
   reviewSummary: document.getElementById('review-summary'),
   reviewList: document.getElementById('review-list'),
+
+  // Teacher spectator view
+  watchGamesBtn: document.getElementById('watch-games-btn'),
+  teacherPinModal: document.getElementById('teacher-pin-modal'),
+  teacherPinInput: document.getElementById('teacher-pin-input'),
+  teacherPinError: document.getElementById('teacher-pin-error'),
+  teacherPinSubmitBtn: document.getElementById('teacher-pin-submit-btn'),
+  teacherPinCancelBtn: document.getElementById('teacher-pin-cancel-btn'),
+  watchListModal: document.getElementById('watch-list-modal'),
+  watchListBody: document.getElementById('watch-list-body'),
+  closeWatchListBtn: document.getElementById('close-watch-list-btn'),
+  spectateBar: document.getElementById('spectate-bar'),
+  spectateRoomCodeLabel: document.getElementById('spectate-room-code'),
+  spectateBackBtn: document.getElementById('spectate-back-btn'),
+  spectateExitBtn: document.getElementById('spectate-exit-btn'),
+  poolLabel: document.getElementById('pool-label'),
 };
 
 /* =========================================================
@@ -139,6 +164,29 @@ el.reviewModal.addEventListener('click', (e) => {
 
 el.onlineCreateBtn.addEventListener('click', () => selectOnlineChoice('create'));
 el.onlineJoinBtn.addEventListener('click', () => selectOnlineChoice('join'));
+
+el.watchGamesBtn.addEventListener('click', () => {
+  el.teacherPinInput.value = '';
+  el.teacherPinError.textContent = '';
+  el.teacherPinModal.classList.remove('hidden');
+  el.teacherPinInput.focus();
+});
+el.teacherPinCancelBtn.addEventListener('click', () => {
+  el.teacherPinModal.classList.add('hidden');
+});
+el.teacherPinModal.addEventListener('click', (e) => {
+  if(e.target === el.teacherPinModal) el.teacherPinModal.classList.add('hidden');
+});
+el.teacherPinSubmitBtn.addEventListener('click', submitTeacherPin);
+el.teacherPinInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter') submitTeacherPin();
+});
+el.closeWatchListBtn.addEventListener('click', closeWatchList);
+el.watchListModal.addEventListener('click', (e) => {
+  if(e.target === el.watchListModal) closeWatchList();
+});
+el.spectateBackBtn.addEventListener('click', () => stopSpectating(true));
+el.spectateExitBtn.addEventListener('click', () => stopSpectating(false));
 
 updateStepVisibility(); // initial state: nothing mode-dependent shown until a mode is picked
 
@@ -266,6 +314,9 @@ function tryStartGame(){
 function resetToSetup(){
   stopTimer();
   leaveOnlineRoom();
+  stopSpectating(false);
+  closeWatchList();
+  el.teacherPinModal.classList.add('hidden');
   state.missLog = [];
   state.rematchFinalizing = false;
   el.reviewModal.classList.add('hidden');
@@ -742,6 +793,15 @@ function showOnlineWinnerModal(room){
   el.winnerModal.classList.remove('hidden');
   el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);
 
+  const { heading, detail } = getOnlineResultText(room);
+  el.winnerHeading.textContent = heading;
+  el.winnerDetail.textContent = detail;
+}
+
+/* Pure text-building for a finished online room — shared by the real
+   players' winner modal above and the read-only spectator view below,
+   so the tie/timeout/win phrasing only has to live in one place. */
+function getOnlineResultText(room){
   const hostP = room.players.host;
   const guestP = room.players.guest;
 
@@ -749,9 +809,10 @@ function showOnlineWinnerModal(room){
     const timedOutRole = room.timedOutRole;
     const timedOutPlayer = timedOutRole === 'host' ? hostP : guestP;
     const winner = timedOutRole === 'host' ? guestP : hostP;
-    el.winnerHeading.textContent = `${winner.name} wins on time!`;
-    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score} pts, ${formatAccuracy(guestP)} accuracy`;
-    return;
+    return {
+      heading: `${winner.name} wins on time!`,
+      detail: `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score} pts, ${formatAccuracy(guestP)} accuracy`,
+    };
   }
 
   if(hostP.score === guestP.score){
@@ -763,18 +824,23 @@ function showOnlineWinnerModal(room){
       const loser = hostTime > guestTime ? guestP : hostP;
       const winnerTime = hostTime > guestTime ? hostTime : guestTime;
       const loserTime = hostTime > guestTime ? guestTime : hostTime;
-      el.winnerHeading.textContent = `${winner.name} wins the tiebreaker!`;
-      el.winnerDetail.textContent = `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(Math.round(winnerTime))} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${formatTime(Math.round(loserTime))} remaining, ${formatAccuracy(loser)} accuracy`;
-    } else {
-      el.winnerHeading.textContent = "It's a tie!";
-      el.winnerDetail.textContent = `${hostP.name} and ${guestP.name} both scored ${hostP.score}.\n${hostP.name}: ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${formatAccuracy(guestP)} accuracy`;
+      return {
+        heading: `${winner.name} wins the tiebreaker!`,
+        detail: `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(Math.round(winnerTime))} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${formatTime(Math.round(loserTime))} remaining, ${formatAccuracy(loser)} accuracy`,
+      };
     }
-  } else {
-    const winner = hostP.score > guestP.score ? hostP : guestP;
-    const loser = hostP.score > guestP.score ? guestP : hostP;
-    el.winnerHeading.textContent = `${winner.name} wins!`;
-    el.winnerDetail.textContent = `${winner.name}: ${winner.score} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score} pts, ${formatAccuracy(loser)} accuracy`;
+    return {
+      heading: "It's a tie!",
+      detail: `${hostP.name} and ${guestP.name} both scored ${hostP.score}.\n${hostP.name}: ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${formatAccuracy(guestP)} accuracy`,
+    };
   }
+
+  const winner = hostP.score > guestP.score ? hostP : guestP;
+  const loser = hostP.score > guestP.score ? guestP : hostP;
+  return {
+    heading: `${winner.name} wins!`,
+    detail: `${winner.name}: ${winner.score} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score} pts, ${formatAccuracy(loser)} accuracy`,
+  };
 }
 
 /* Renders the accept/waiting/incoming states for the online rematch
@@ -838,6 +904,236 @@ function handleRematchClick(){
   } else {
     rematchLocal();
   }
+}
+
+/* =========================================================
+   Teacher spectator view — watch list + PIN gate
+
+   Only Online games are watchable (Solo/Same Device never touch
+   Firebase, so there's nothing shared to watch). This whole section
+   never calls submitRoomUpdate — a spectator's tab must never be able
+   to mutate a room, only read it via listenToRoom/listenToAllRooms.
+   ========================================================= */
+
+function submitTeacherPin(){
+  if(el.teacherPinInput.value.trim() === TEACHER_PIN){
+    el.teacherPinModal.classList.add('hidden');
+    openWatchList();
+  } else {
+    el.teacherPinError.textContent = 'Incorrect PIN.';
+  }
+}
+
+function openWatchList(){
+  el.watchListModal.classList.remove('hidden');
+  if(!state.unsubscribeRoomsList){
+    state.unsubscribeRoomsList = listenToAllRooms(renderWatchList);
+  }
+}
+
+function closeWatchList(){
+  el.watchListModal.classList.add('hidden');
+  if(state.unsubscribeRoomsList){
+    state.unsubscribeRoomsList();
+    state.unsubscribeRoomsList = null;
+  }
+}
+
+function renderWatchList(roomsObj){
+  pruneStaleRooms(roomsObj).catch(() => { /* best-effort; next snapshot will retry */ });
+
+  const rooms = Object.entries(roomsObj || {})
+    .filter(([, room]) => room && !isRoomStale(room) && (room.status === 'active' || room.status === 'waiting'))
+    .sort(([, a], [, b]) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  if(rooms.length === 0){
+    el.watchListBody.innerHTML = '<p class="watch-empty">No online games are currently being played.</p>';
+    return;
+  }
+
+  el.watchListBody.innerHTML = rooms.map(([code, room]) => {
+    const host = room.players?.host;
+    const guest = room.players?.guest;
+    if(!host) return ''; // malformed/partial room, skip defensively
+
+    const names = guest ? `${host.name} vs ${guest.name}` : `${host.name} (waiting for opponent)`;
+    const progress = room.status === 'active'
+      ? `Pair ${room.pairIndex} of ${room.settings?.totalPairs ?? '?'}`
+      : 'Not started yet';
+    const scoreText = guest ? `${host.score} : ${guest.score}` : '';
+    const watchable = room.status === 'active' && !!guest;
+
+    return `
+      <div class="watch-row">
+        <div class="watch-row-info">
+          <span class="watch-room-code">${code}</span>
+          <span class="watch-room-names">${names}</span>
+          <span class="watch-room-progress">${progress}${scoreText ? ' · ' + scoreText : ''}</span>
+        </div>
+        <button class="secondary-btn watch-row-btn" data-room-code="${code}" ${watchable ? '' : 'disabled'} type="button">${watchable ? 'Watch' : 'Waiting…'}</button>
+      </div>`;
+  }).join('');
+
+  el.watchListBody.querySelectorAll('.watch-row-btn:not(:disabled)').forEach(btn => {
+    btn.addEventListener('click', () => startSpectating(btn.dataset.roomCode));
+  });
+}
+
+function startSpectating(code){
+  closeWatchList(); // stop the all-rooms listener while focused on one room
+  state.spectating = true;
+  state.spectateRoomCode = code;
+  state.spectateRoom = null;
+
+  el.spectateBar.classList.remove('hidden');
+  el.spectateRoomCodeLabel.textContent = code;
+  el.poolLabel.textContent = 'Spectating — read only';
+  el.setupModal.classList.add('hidden');
+  el.gameScreen.classList.remove('hidden');
+
+  state.unsubscribeSpectateRoom = listenToRoom(code, (room) => {
+    if(!room){
+      // Room vanished mid-watch (e.g. host cancelled) — bail back to the list.
+      stopSpectating(true);
+      return;
+    }
+    renderSpectatorRoom(room);
+  });
+}
+
+function stopSpectating(backToList){
+  if(state.unsubscribeSpectateRoom){
+    state.unsubscribeSpectateRoom();
+    state.unsubscribeSpectateRoom = null;
+  }
+  stopSpectatorTimerPoll();
+  state.spectating = false;
+  state.spectateRoomCode = null;
+  state.spectateRoom = null;
+
+  el.spectateBar.classList.add('hidden');
+  el.gameScreen.classList.add('hidden');
+  el.poolLabel.textContent = 'Tap a number for the glowing slot';
+
+  if(backToList){
+    openWatchList();
+  } else {
+    el.setupModal.classList.remove('hidden');
+  }
+}
+
+/* Repaints the shared game-screen from a watched room's snapshot. Reuses
+   the same renderProblem()/renderPool()/updateScoreChips() as real play —
+   renderPool() itself refuses to attach click handlers while
+   state.spectating is true, so this can never accidentally submit a move. */
+function renderSpectatorRoom(room){
+  const prevRoom = state.spectateRoom;
+  state.spectateRoom = room;
+  state.problem = room.problem;
+  state.layout = buildProblemLayout(room.problem);
+  state.cells = state.layout.cells;
+  state.cellIndex = room.cellIndex;
+  state.pool = room.pool || [];
+  state.pairIndex = room.pairIndex;
+  state.totalPairs = room.settings.totalPairs;
+  state.mode = 'vs'; // reuse the two-player rendering paths
+  state.isOnline = false; // a spectator is never "online" in the interactive sense
+
+  const hostP = room.players.host;
+  const guestP = room.players.guest;
+  state.players = guestP
+    ? [
+        { name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount },
+        { name: guestP.name, score: guestP.score, correctCount: guestP.correctCount, wrongCount: guestP.wrongCount },
+      ]
+    : [{ name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount }];
+  state.currentPlayer = room.turn === 'host' ? 0 : 1;
+
+  const prevGuestPresent = !!prevRoom?.players?.guest;
+  if(!prevGuestPresent && guestP) playSound('start');
+  if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
+  if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
+
+  el.chipP1Name.textContent = hostP.name;
+  el.chipP2Name.textContent = guestP ? guestP.name : 'Waiting…';
+  el.chipP2.classList.toggle('hidden', !guestP);
+
+  const timerOn = room.settings.timeControlSeconds > 0;
+  el.chipP1Timer.classList.toggle('hidden', !timerOn);
+  el.chipP2Timer.classList.toggle('hidden', !timerOn || !guestP);
+
+  if(!guestP){
+    stopSpectatorTimerPoll();
+    el.pairCounter.textContent = 'Waiting for a second player…';
+    el.problemStrip.innerHTML = '';
+    el.poolTray.innerHTML = '';
+    el.turnFlag.textContent = '';
+    el.feedbackLine.textContent = '';
+    updateScoreChips();
+    return;
+  }
+
+  if(room.status === 'finished'){
+    stopSpectatorTimerPoll();
+    const { heading, detail } = getOnlineResultText(room);
+    el.pairCounter.textContent = 'Game over';
+    renderProblem(); // shows the board as it stood at the final move
+    el.turnFlag.textContent = heading;
+    el.feedbackLine.textContent = detail.split('\n')[0];
+    el.feedbackLine.className = 'feedback-line good';
+    el.poolTray.innerHTML = '';
+    updateScoreChips();
+    return;
+  }
+
+  if(timerOn){
+    if(!state.spectateTimerId) startSpectatorTimerPoll();
+  } else {
+    stopSpectatorTimerPoll();
+  }
+
+  el.pairCounter.textContent = `Pair ${state.pairIndex} of ${state.totalPairs}`;
+  el.feedbackLine.textContent = '';
+  el.feedbackLine.className = 'feedback-line';
+  renderProblem();
+  renderPool();
+  updateScoreChips();
+}
+
+/* Display-only chess-clock poll for the spectator view — deliberately a
+   separate, smaller function from tickOnlineTimer() rather than reusing
+   it, because that one calls checkOnlineTimeout(), which can submit a
+   room update. A spectator must never be able to end someone else's game. */
+function startSpectatorTimerPoll(){
+  stopSpectatorTimerPoll();
+  tickSpectatorTimer();
+  state.spectateTimerId = setInterval(tickSpectatorTimer, 500);
+}
+
+function stopSpectatorTimerPoll(){
+  if(state.spectateTimerId !== null){
+    clearInterval(state.spectateTimerId);
+    state.spectateTimerId = null;
+  }
+}
+
+function tickSpectatorTimer(){
+  const room = state.spectateRoom;
+  if(!room || room.status !== 'active' || !room.turnDeadline) return;
+
+  const now = Date.now();
+  const activeRole = room.turn;
+  const inactiveRole = activeRole === 'host' ? 'guest' : 'host';
+  const activeRemaining = Math.max(0, Math.ceil((room.turnDeadline - now) / 1000));
+  const inactiveRemaining = Math.round(room.timeRemaining[inactiveRole]);
+
+  const hostRemaining = activeRole === 'host' ? activeRemaining : inactiveRemaining;
+  const guestRemaining = activeRole === 'guest' ? activeRemaining : inactiveRemaining;
+
+  el.chipP1Timer.textContent = formatTime(hostRemaining);
+  el.chipP1Timer.classList.toggle('time-low', hostRemaining <= 10);
+  el.chipP2Timer.textContent = formatTime(guestRemaining);
+  el.chipP2Timer.classList.toggle('time-low', guestRemaining <= 10);
 }
 
 /* =========================================================
@@ -941,11 +1237,16 @@ function renderPool(){
     btn.className = 'tile-btn';
     btn.textContent = tile.value;
     btn.dataset.tileId = tile.id;
-    if(state.isOnline && !myTurn) btn.disabled = true;
-    btn.addEventListener('click', () => {
-      if(state.isOnline) handleOnlineTileClick(tile.id);
-      else handleTileClick(tile.id);
-    });
+    if(state.spectating){
+      // Read-only: no listener at all, not just a disabled attribute.
+      btn.disabled = true;
+    } else {
+      if(state.isOnline && !myTurn) btn.disabled = true;
+      btn.addEventListener('click', () => {
+        if(state.isOnline) handleOnlineTileClick(tile.id);
+        else handleTileClick(tile.id);
+      });
+    }
     el.poolTray.appendChild(btn);
   });
 }

@@ -16,6 +16,11 @@
        turnDeadline: ms timestamp the current turn expires at (null until
          the game actually starts, i.e. once a guest joins — not counted
          down while the host is alone waiting for someone to join).
+       createdAt: ms timestamp the room was created.
+       lastActivityAt: ms timestamp of the most recent write to the room
+         (move, join, rematch request...). Used only for the staleness
+         sweep below — there's no presence detection, so this is the
+         closest approximation of "is anyone still here" available.
 
    Only `problem` (the {a,b,op,c,d} numbers) is synced, not the full
    derived board — buildProblemLayout() is a pure function, so both
@@ -23,12 +28,19 @@
    keeps payloads small and reuses all the existing pure logic as-is.
    ========================================================= */
 
-import { ref, set, get, update, onValue, off } from "firebase/database";
+import { ref, set, get, update, remove, onValue, off } from "firebase/database";
 import { db, ensureSignedIn } from "./firebase.js";
 import { generateProblem, buildProblemLayout, buildPool } from "./logic.js";
 
 // No 0/O or 1/I — easy to read aloud/type on a shared classroom code.
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/* Staleness thresholds for the auto-cleanup sweep (see pruneStaleRooms
+   below). Tune these directly here if 5/30/60 minutes doesn't fit your
+   class period — no other code needs to change. */
+const STALE_WAITING_MS = 5 * 60 * 1000;   // created, nobody ever joined
+const STALE_ACTIVE_MS = 30 * 60 * 1000;   // no move/join/rematch activity — likely both players left
+const STALE_FINISHED_MS = 60 * 60 * 1000; // finished games are just DB clutter after this long
 
 function generateRoomCode(){
   let code = '';
@@ -56,6 +68,7 @@ export async function createRoom(hostName, settings){
 
   const roomData = {
     createdAt: Date.now(),
+    lastActivityAt: Date.now(),
     status: 'waiting',
     settings,
     players: {
@@ -91,6 +104,7 @@ export async function joinRoom(code, guestName){
   const updates = {
     'players/guest': { name: guestName, score: 0, correctCount: 0, wrongCount: 0 },
     status: 'active',
+    lastActivityAt: Date.now(),
   };
 
   // Start the clock now — not at room creation, so the host waiting
@@ -110,8 +124,52 @@ export function listenToRoom(code, callback){
   return () => off(roomRef, 'value', handler);
 }
 
+/* For the teacher "Watch Games" view: subscribes to the whole /rooms
+   node so the list can update live as games start, progress, and
+   finish. Fine at classroom scale (dozens of rooms); callback receives
+   a plain object keyed by room code, or {} if there are none. */
+export function listenToAllRooms(callback){
+  const roomsRef = ref(db, 'rooms');
+  const handler = (snap) => callback(snap.val() || {});
+  onValue(roomsRef, handler);
+  return () => off(roomsRef, 'value', handler);
+}
+
+/* Every gameplay update (tile taps, timeouts) flows through here, so
+   stamping lastActivityAt in one place covers all of it automatically —
+   nothing else has to remember to do it. */
 export function submitRoomUpdate(code, updates){
-  return update(ref(db, 'rooms/' + code), updates);
+  return update(ref(db, 'rooms/' + code), { ...updates, lastActivityAt: Date.now() });
+}
+
+/* True once a room looks abandoned enough to be safe to prune — see the
+   STALE_*_MS thresholds above. "waiting" rooms are unambiguous (nobody's
+   game data is lost by deleting one); "active"/"finished" ones use a much
+   longer window since there's no presence detection to be sure someone
+   isn't just thinking. */
+export function isRoomStale(room, now = Date.now()){
+  if(!room) return false;
+  const lastActivity = room.lastActivityAt || room.createdAt || 0;
+
+  if(room.status === 'waiting') return now - (room.createdAt || 0) > STALE_WAITING_MS;
+  if(room.status === 'active') return now - lastActivity > STALE_ACTIVE_MS;
+  if(room.status === 'finished') return now - lastActivity > STALE_FINISHED_MS;
+  return false;
+}
+
+/* Best-effort cleanup: there's no server-side cron here, so this runs
+   opportunistically whenever the teacher's watch list is open (each
+   snapshot from listenToAllRooms). Deleting an already-deleted room is a
+   harmless no-op, so overlapping sweeps from multiple open tabs are fine. */
+export async function pruneStaleRooms(roomsObj){
+  const now = Date.now();
+  const staleCodes = Object.entries(roomsObj || {})
+    .filter(([, room]) => isRoomStale(room, now))
+    .map(([code]) => code);
+
+  await Promise.all(
+    staleCodes.map(code => remove(ref(db, 'rooms/' + code)).catch(() => { /* best-effort */ }))
+  );
 }
 
 /* Opt-in rematch: each player flips their own flag. Once both flags are
@@ -119,7 +177,7 @@ export function submitRoomUpdate(code, updates){
    which has exactly one device — the host — do that, to avoid both
    players racing to reset the same room at once). */
 export function requestRematch(code, role){
-  return update(ref(db, 'rooms/' + code), { [`rematch/${role}`]: true });
+  return update(ref(db, 'rooms/' + code), { [`rematch/${role}`]: true, lastActivityAt: Date.now() });
 }
 
 /* Restarts a finished room in place: fresh problem/pool, scores and
@@ -150,6 +208,7 @@ export async function resetRoomForRematch(code, settings){
     turnDeadline: t > 0 ? Date.now() + t * 1000 : null,
     missLog: [],
     rematch: { host: false, guest: false },
+    lastActivityAt: Date.now(),
   };
 
   await update(ref(db, 'rooms/' + code), updates);
