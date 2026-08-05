@@ -1,6 +1,6 @@
 import './style.css';
 import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
-import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale } from './online.js';
+import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS } from './online.js';
 import { TEACHER_PIN } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
 import { db } from './firebase.js';
@@ -34,6 +34,7 @@ const state = {
   myRole: null,          // 'host' | 'guest'
   unsubscribeRoom: null,
   onlineTimerPollId: null, // setInterval handle for the online chess-clock poll
+  stopPresence: null, // cleanup function from trackPresence(), for the real player's own connection
   missLog: [], // wrong-attempt records for the current game, for the post-game review
   rematchFinalizing: false, // guards against the host double-triggering resetRoomForRematch
 
@@ -126,7 +127,45 @@ const el = {
   spectateBackBtn: document.getElementById('spectate-back-btn'),
   spectateExitBtn: document.getElementById('spectate-exit-btn'),
   poolLabel: document.getElementById('pool-label'),
+  presenceBanner: document.getElementById('presence-banner'),
+
+  // Reconnection
+  rejoinBanner: document.getElementById('rejoin-banner'),
+  rejoinBannerText: document.getElementById('rejoin-banner-text'),
+  rejoinBtn: document.getElementById('rejoin-btn'),
+  rejoinDismissBtn: document.getElementById('rejoin-dismiss-btn'),
 };
+
+/* =========================================================
+   Reconnection: a browser remembers its own seat in a room across a
+   closed tab (not just a refresh — onDisconnect on the Firebase side
+   already covers that instantly). savedAt gets refreshed on every room
+   update while actively playing, so it tracks "last confirmed
+   connected" rather than "first joined" — see onRoomUpdate below.
+
+   This block must come before anything that calls checkForRejoinableSeat()
+   runs (see the setup-screen wiring further down) — SEAT_STORAGE_KEY is a
+   `const`, and referencing it before its own declaration line has
+   executed throws, even though the functions using it are hoisted.
+   ========================================================= */
+const SEAT_STORAGE_KEY = 'duelingRatiosSeat';
+
+function saveSeat(code, role, name){
+  try{
+    localStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ code, role, name, savedAt: Date.now() }));
+  } catch(e) { /* storage unavailable (private browsing etc.) — rejoin just won't be offered */ }
+}
+
+function loadSeat(){
+  try{
+    const raw = localStorage.getItem(SEAT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+
+function clearSeat(){
+  try{ localStorage.removeItem(SEAT_STORAGE_KEY); } catch(e) { /* ignore */ }
+}
 
 /* =========================================================
    Setup screen wiring
@@ -187,8 +226,14 @@ el.watchListModal.addEventListener('click', (e) => {
 });
 el.spectateBackBtn.addEventListener('click', () => stopSpectating(true));
 el.spectateExitBtn.addEventListener('click', () => stopSpectating(false));
+el.rejoinBtn.addEventListener('click', attemptRejoin);
+el.rejoinDismissBtn.addEventListener('click', () => {
+  clearSeat();
+  el.rejoinBanner.classList.add('hidden');
+});
 
 updateStepVisibility(); // initial state: nothing mode-dependent shown until a mode is picked
+checkForRejoinableSeat(); // offer to reconnect if this browser has an unfinished game saved
 
 el.opAll.addEventListener('change', () => {
   el.opChoices.forEach(cb => { cb.checked = el.opAll.checked; });
@@ -330,6 +375,9 @@ function resetToSetup(){
   el.rematchStatus.textContent = '';
   el.feedbackLine.textContent = '';
   el.feedbackLine.className = 'feedback-line';
+  el.presenceBanner.classList.add('hidden');
+  el.presenceBanner.textContent = '';
+  el.rejoinBanner.classList.add('hidden');
   state.mode = null;
   state.onlineChoice = null;
   el.modeSolo.classList.remove('selected');
@@ -346,9 +394,14 @@ function resetToSetup(){
    ========================================================= */
 
 function leaveOnlineRoom(){
+  clearSeat();
   if(state.unsubscribeRoom){
     state.unsubscribeRoom();
     state.unsubscribeRoom = null;
+  }
+  if(state.stopPresence){
+    state.stopPresence();
+    state.stopPresence = null;
   }
   stopOnlineTimerPoll();
   state.isOnline = false;
@@ -400,6 +453,8 @@ async function handleCreateGame(){
     el.setupModal.classList.add('hidden');
     el.waitingModal.classList.remove('hidden');
 
+    saveSeat(code, 'host', name1);
+    state.stopPresence = trackPresence(code, 'host');
     state.unsubscribeRoom = listenToRoom(code, onRoomUpdate);
   } catch (err){
     el.setupError.textContent = 'Could not create a room. Please try again.';
@@ -431,11 +486,67 @@ async function handleJoinGame(){
     state.mode = 'online';
     state.timeControlSeconds = 0;
 
+    saveSeat(code, 'guest', name1);
+    state.stopPresence = trackPresence(code, 'guest');
     state.unsubscribeRoom = listenToRoom(code, onRoomUpdate);
   } catch (err){
     el.setupError.textContent = err.message || 'Could not join that room.';
   } finally {
     el.startBtn.disabled = false;
+  }
+}
+
+/* =========================================================
+   Reconnection prompt — checked once at startup. Deliberately NOT
+   automatic: silently dropping someone back into a game on page load
+   would be surprising if they just wanted a clean start, so this only
+   ever offers, never forces.
+   ========================================================= */
+
+function checkForRejoinableSeat(){
+  const seat = loadSeat();
+  if(!seat) return;
+
+  if(Date.now() - seat.savedAt > REJOIN_WINDOW_MS){
+    clearSeat(); // past the window — not worth even offering
+    return;
+  }
+
+  el.rejoinBannerText.textContent = `You have an unfinished game in room ${seat.code} as ${seat.name}. Rejoin where you left off?`;
+  el.rejoinBanner.classList.remove('hidden');
+}
+
+async function attemptRejoin(){
+  const seat = loadSeat();
+  if(!seat) return;
+
+  el.rejoinBtn.disabled = true;
+  try{
+    const room = await getRoomOnce(seat.code);
+    if(!room || !room.players?.[seat.role]){
+      // Room's gone (finished long ago and got pruned, host cancelled
+      // while waiting, etc.) — nothing to rejoin.
+      clearSeat();
+      el.rejoinBanner.classList.add('hidden');
+      el.setupError.textContent = 'That game is no longer available.';
+      return;
+    }
+
+    state.isOnline = true;
+    state.roomCode = seat.code;
+    state.myRole = seat.role;
+    state.mode = 'online';
+    state.timeControlSeconds = 0;
+
+    el.rejoinBanner.classList.add('hidden');
+    saveSeat(seat.code, seat.role, seat.name);
+    state.stopPresence = trackPresence(seat.code, seat.role);
+    state.unsubscribeRoom = listenToRoom(seat.code, onRoomUpdate);
+  } catch (err){
+    console.error('Rejoin failed:', err);
+    el.setupError.textContent = 'Could not rejoin that game. Please try again.';
+  } finally {
+    el.rejoinBtn.disabled = false;
   }
 }
 
@@ -449,6 +560,11 @@ function onRoomUpdate(room){
     if(state.isOnline) resetToSetup();
     return;
   }
+
+  // Every update we actually receive means we're live right now — keep
+  // the saved seat's timestamp current so "last confirmed connected"
+  // reflects reality, not just the moment we first joined.
+  if(state.isOnline) saveSeat(state.roomCode, state.myRole, room.players?.[state.myRole]?.name || '');
 
   const prevRoom = state.room; // snapshot from before this update, used only for sound diffing below
   state.room = room;
@@ -502,13 +618,57 @@ function onRoomUpdate(room){
   el.waitingModal.classList.add('hidden');
 
   const myIdx = state.myRole === 'host' ? 0 : 1;
-  el.chipP1Name.textContent = hostP.name + (state.myRole === 'host' ? ' (You)' : '');
-  el.chipP2Name.textContent = guestP.name + (state.myRole === 'guest' ? ' (You)' : '');
+  const hostConnected = room.presence?.host ? room.presence.host.connected !== false : true;
+  const guestConnected = room.presence?.guest ? room.presence.guest.connected !== false : true;
+  el.chipP1Name.textContent = hostP.name + (state.myRole === 'host' ? ' (You)' : '') + (hostConnected ? '' : ' \uD83D\uDD0C');
+  el.chipP2Name.textContent = guestP.name + (state.myRole === 'guest' ? ' (You)' : '') + (guestConnected ? '' : ' \uD83D\uDD0C');
   el.chipP2.classList.remove('hidden');
 
   const timerOn = room.settings.timeControlSeconds > 0;
   el.chipP1Timer.classList.toggle('hidden', !timerOn);
   el.chipP2Timer.classList.toggle('hidden', !timerOn);
+
+  // Presence: pause the clock fairly if my opponent's connection just
+  // dropped (rather than letting time drain against someone who isn't
+  // there), and resume it once they're back. Edge-triggered off the
+  // prev-vs-new comparison, so this only fires on the actual transition
+  // rather than writing on every unrelated room update. Whichever device
+  // is still connected does this — the other one, by definition, can't.
+  const opponentRole = state.myRole === 'host' ? 'guest' : 'host';
+  const opponentConnected = opponentRole === 'host' ? hostConnected : guestConnected;
+  const prevHostConnected = prevRoom?.presence?.host ? prevRoom.presence.host.connected !== false : true;
+  const prevGuestConnected = prevRoom?.presence?.guest ? prevRoom.presence.guest.connected !== false : true;
+  const prevOpponentConnected = opponentRole === 'host' ? prevHostConnected : prevGuestConnected;
+
+  if(room.status === 'active'){
+    if(timerOn && !opponentConnected && prevOpponentConnected && room.turnDeadline){
+      const bankedActive = Math.max(0, (room.turnDeadline - Date.now()) / 1000);
+      const activeRole = room.turn;
+      submitRoomUpdate(state.roomCode, {
+        timeRemaining: {
+          host: activeRole === 'host' ? bankedActive : room.timeRemaining.host,
+          guest: activeRole === 'guest' ? bankedActive : room.timeRemaining.guest,
+        },
+        turnDeadline: null,
+      }).catch(() => { /* the other device's pause write, if any, still lands */ });
+    } else if(timerOn && opponentConnected && !prevOpponentConnected && !room.turnDeadline){
+      const activeRole = room.turn;
+      submitRoomUpdate(state.roomCode, {
+        turnDeadline: Date.now() + (room.timeRemaining[activeRole] || 0) * 1000,
+      }).catch(() => {});
+    }
+
+    if(!opponentConnected){
+      const opponentName = opponentRole === 'host' ? hostP.name : guestP.name;
+      el.presenceBanner.textContent = `\u26A0\uFE0F ${opponentName} disconnected${timerOn ? ' — clock paused' : ''}`;
+      el.presenceBanner.classList.remove('hidden');
+    } else {
+      el.presenceBanner.classList.add('hidden');
+      el.presenceBanner.textContent = '';
+    }
+  } else {
+    el.presenceBanner.classList.add('hidden');
+  }
 
   if(room.status === 'finished'){
     showOnlineWinnerModal(room);
@@ -967,7 +1127,11 @@ function renderWatchList(roomsObj){
     const guest = room.players?.guest;
     if(!host) return ''; // malformed/partial room, skip defensively
 
-    const names = guest ? `${host.name} vs ${guest.name}` : `${host.name} (waiting for opponent)`;
+    const hostConnected = room.presence?.host ? room.presence.host.connected !== false : true;
+    const guestConnected = room.presence?.guest ? room.presence.guest.connected !== false : true;
+    const hostLabel = host.name + (hostConnected ? '' : ' \uD83D\uDD0C');
+    const guestLabel = guest ? guest.name + (guestConnected ? '' : ' \uD83D\uDD0C') : null;
+    const names = guestLabel ? `${hostLabel} vs ${guestLabel}` : `${hostLabel} (waiting for opponent)`;
     const progress = room.status === 'active'
       ? `Pair ${room.pairIndex} of ${room.settings?.totalPairs ?? '?'}`
       : 'Not started yet';
@@ -1025,6 +1189,8 @@ function stopSpectating(backToList){
   el.spectateBar.classList.add('hidden');
   el.gameScreen.classList.add('hidden');
   el.poolLabel.textContent = 'Tap a number for the glowing slot';
+  el.presenceBanner.classList.add('hidden');
+  el.presenceBanner.textContent = '';
 
   if(backToList){
     openWatchList();
@@ -1065,8 +1231,10 @@ function renderSpectatorRoom(room){
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
 
-  el.chipP1Name.textContent = hostP.name;
-  el.chipP2Name.textContent = guestP ? guestP.name : 'Waiting…';
+  const hostConnected = room.presence?.host ? room.presence.host.connected !== false : true;
+  const guestConnected = room.presence?.guest ? room.presence.guest.connected !== false : true;
+  el.chipP1Name.textContent = hostP.name + (hostConnected ? '' : ' \uD83D\uDD0C');
+  el.chipP2Name.textContent = guestP ? guestP.name + (guestConnected ? '' : ' \uD83D\uDD0C') : 'Waiting…';
   el.chipP2.classList.toggle('hidden', !guestP);
 
   const timerOn = room.settings.timeControlSeconds > 0;
@@ -1080,8 +1248,21 @@ function renderSpectatorRoom(room){
     el.poolTray.innerHTML = '';
     el.turnFlag.textContent = '';
     el.feedbackLine.textContent = '';
+    el.presenceBanner.classList.add('hidden');
     updateScoreChips();
     return;
+  }
+
+  // Read-only mirror of the pause/resume signal in onRoomUpdate — this
+  // never writes anything, it just reflects whatever the real players'
+  // devices have already decided.
+  if(room.status === 'active' && (!hostConnected || !guestConnected)){
+    const goneNames = [!hostConnected && hostP.name, !guestConnected && guestP.name].filter(Boolean);
+    const verb = goneNames.length > 1 ? 'have disconnected' : 'disconnected';
+    el.presenceBanner.textContent = `\u26A0\uFE0F ${goneNames.join(' & ')} ${verb}${timerOn ? ' — clock paused' : ''}`;
+    el.presenceBanner.classList.remove('hidden');
+  } else {
+    el.presenceBanner.classList.add('hidden');
   }
 
   if(room.status === 'finished'){
@@ -1093,6 +1274,7 @@ function renderSpectatorRoom(room){
     el.feedbackLine.textContent = detail.split('\n')[0];
     el.feedbackLine.className = 'feedback-line good';
     el.poolTray.innerHTML = '';
+    el.presenceBanner.classList.add('hidden');
     updateScoreChips();
     return;
   }

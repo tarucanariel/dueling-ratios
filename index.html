@@ -19,6 +19,14 @@
       <button class="text-link-btn" id="watch-games-btn" type="button">&#128065; Watch Games</button>
     </div>
 
+    <div class="rejoin-banner hidden" id="rejoin-banner">
+      <p id="rejoin-banner-text"></p>
+      <div class="rejoin-banner-actions">
+        <button class="primary-btn" id="rejoin-btn" type="button">Rejoin Game</button>
+        <button class="secondary-btn" id="rejoin-dismiss-btn" type="button">Dismiss</button>
+      </div>
+    </div>
+
     <div class="setup-step" id="step-name1">
       <label for="player1-name">Your name</label>
       <input type="text" id="player1-name" maxlength="16" placeholder="e.g. Light" autocomplete="off">
@@ -225,6 +233,8 @@
       <button class="text-link-btn" id="spectate-exit-btn" type="button">Exit</button>
     </div>
   </div>
+
+  <div class="presence-banner hidden" id="presence-banner"></div>
 
   <header class="score-bar">
     <div class="player-chip player-one" id="chip-p1">

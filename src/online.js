@@ -18,9 +18,28 @@
          down while the host is alone waiting for someone to join).
        createdAt: ms timestamp the room was created.
        lastActivityAt: ms timestamp of the most recent write to the room
-         (move, join, rematch request...). Used only for the staleness
-         sweep below — there's no presence detection, so this is the
-         closest approximation of "is anyone still here" available.
+         (move, join, rematch request...). Used for the staleness sweep
+         below, as a fallback for whichever player role presence (below)
+         doesn't cover.
+       presence: { host?: {connected, lastSeen}, guest?: {connected, lastSeen} }
+         — set up via trackPresence() using Firebase's onDisconnect(),
+         so `connected` flips to false automatically the moment that
+         player's browser tab/connection drops, without either device
+         having to poll for it. Absent entirely for rooms created before
+         this existed, or for the brief window before the first write
+         lands — always treat "no presence data" as "assume connected"
+         rather than "assume gone".
+
+   Reconnection: nothing about "who's in this room" lives only in
+   Firebase — main.js also saves {code, role, name} to localStorage the
+   moment a player creates/joins/rejoins, refreshed on every room update
+   while actively playing. So the last-saved copy is effectively "the
+   moment we were last confirmed connected". If the browser closes
+   entirely (not just a refresh — onDisconnect already handles that),
+   reopening it within REJOIN_WINDOW_MS prompts to rejoin the same seat;
+   see main.js's rejoin-banner flow. This module has no concept of
+   "seats" itself — it just exposes getRoomOnce() for validating one
+   still exists before main.js commits to reconnecting.
 
    Only `problem` (the {a,b,op,c,d} numbers) is synced, not the full
    derived board — buildProblemLayout() is a pure function, so both
@@ -28,7 +47,7 @@
    keeps payloads small and reuses all the existing pure logic as-is.
    ========================================================= */
 
-import { ref, set, get, update, remove, onValue, off } from "firebase/database";
+import { ref, set, get, update, remove, onValue, off, onDisconnect, serverTimestamp } from "firebase/database";
 import { db, ensureSignedIn } from "./firebase.js";
 import { generateProblem, buildProblemLayout, buildPool } from "./logic.js";
 
@@ -40,6 +59,15 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
    class period — no other code needs to change. */
 const STALE_WAITING_MS = 5 * 60 * 1000;   // created, nobody ever joined
 const STALE_ACTIVE_MS = 30 * 60 * 1000;   // no move/join/rematch activity — likely both players left
+
+/* How long a browser that closed can still reclaim its seat (see
+   trackPresence/getRoomOnce below, used by main.js's rejoin-prompt flow).
+   STALE_ACTIVE_BOTH_GONE_MS is deliberately kept a bit longer than this —
+   a room must never get pruned before a legitimate rejoin attempt within
+   the promised window would still have worked. */
+export const REJOIN_WINDOW_MS = 10 * 60 * 1000;
+const STALE_ACTIVE_BOTH_GONE_MS = REJOIN_WINDOW_MS + 2 * 60 * 1000; // presence confirms BOTH disconnected
+
 const STALE_FINISHED_MS = 60 * 60 * 1000; // finished games are just DB clutter after this long
 
 function generateRoomCode(){
@@ -116,12 +144,57 @@ export async function joinRoom(code, guestName){
   await update(roomRef, updates);
 }
 
+/* Registers this browser's live connection as `role` (host/guest) in
+   `rooms/{code}/presence`. Uses Firebase's onDisconnect(), which is a
+   write registered with the server itself — it fires even if this tab
+   crashes or loses power, since it's the server noticing the socket
+   drop, not client code that has to run at the moment of disconnecting.
+
+   `.info/connected` is a special per-connection path that flips true
+   every time this client (re)establishes a live connection — including
+   after a network blip — and Firebase's documented pattern is to
+   re-register the onDisconnect() hook every single time it does, since
+   a fresh connection needs its own hook. Detection is near-instant for
+   a closed tab; a silent network drop (WiFi dying without the tab
+   closing) can take up to ~60s for the server to notice the socket has
+   gone stale — that's an inherent limit of this approach, not something
+   client code can speed up.
+
+   Returns a cleanup function for a deliberate exit (New Game / Exit),
+   so we don't wait out that ~60s when we already know we're leaving. */
+export function trackPresence(code, role){
+  const connectedRef = ref(db, '.info/connected');
+  const presenceRef = ref(db, `rooms/${code}/presence/${role}`);
+
+  const handler = (snap) => {
+    if(snap.val() !== true) return;
+    onDisconnect(presenceRef)
+      .set({ connected: false, lastSeen: serverTimestamp() })
+      .then(() => set(presenceRef, { connected: true, lastSeen: serverTimestamp() }));
+  };
+  onValue(connectedRef, handler);
+
+  return () => {
+    off(connectedRef, 'value', handler);
+    onDisconnect(presenceRef).cancel();
+    set(presenceRef, { connected: false, lastSeen: serverTimestamp() }).catch(() => { /* best-effort */ });
+  };
+}
+
 /* Returns an unsubscribe function. */
 export function listenToRoom(code, callback){
   const roomRef = ref(db, 'rooms/' + code);
   const handler = (snap) => callback(snap.val());
   onValue(roomRef, handler);
   return () => off(roomRef, 'value', handler);
+}
+
+/* One-off read (no subscription) — used to validate a saved seat exists
+   before committing to a rejoin, without wiring up a live listener for
+   a room that might turn out to be gone. */
+export async function getRoomOnce(code){
+  const snap = await get(ref(db, 'rooms/' + code));
+  return snap.exists() ? snap.val() : null;
 }
 
 /* For the teacher "Watch Games" view: subscribes to the whole /rooms
@@ -152,7 +225,13 @@ export function isRoomStale(room, now = Date.now()){
   const lastActivity = room.lastActivityAt || room.createdAt || 0;
 
   if(room.status === 'waiting') return now - (room.createdAt || 0) > STALE_WAITING_MS;
-  if(room.status === 'active') return now - lastActivity > STALE_ACTIVE_MS;
+  if(room.status === 'active'){
+    const h = room.presence?.host;
+    const g = room.presence?.guest;
+    const bothConfirmedGone = h && g && h.connected === false && g.connected === false;
+    const threshold = bothConfirmedGone ? STALE_ACTIVE_BOTH_GONE_MS : STALE_ACTIVE_MS;
+    return now - lastActivity > threshold;
+  }
   if(room.status === 'finished') return now - lastActivity > STALE_FINISHED_MS;
   return false;
 }
