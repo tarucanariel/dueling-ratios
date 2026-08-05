@@ -70,6 +70,11 @@ export function randNumerator(allowNegatives){
   return magnitude;
 }
 
+// Chance a "+"/"-" problem draws a dissimilar (different-denominator) pair
+// rather than a similar (same-denominator) one. Tune this single number if
+// 70/30 isn't right for a given class — 0.5 would be back to an even split.
+const DISSIMILAR_CHANCE = 0.7;
+
 /* opts: { allowedOps: ['+','-','×','÷'], allowNegatives: bool } */
 export function generateProblem(opts){
   const { allowedOps, allowNegatives } = opts;
@@ -81,9 +86,15 @@ export function generateProblem(opts){
   c = randNumerator(allowNegatives); // never 0 now, so division-by-zero-fraction can't happen
 
   if(op === '+' || op === '-'){
-    // 50/50 between similar (equal denominators) and dissimilar boards
-    const wantSimilar = randInt(0, 1) === 0;
-    d = wantSimilar ? b : (() => { let x; do { x = randInt(1, 9); } while(x === b); return x; })();
+    // Math.random() < DISSIMILAR_CHANCE is true with exactly that
+    // probability, so this is DISSIMILAR_CHANCE (70%) dissimilar and
+    // (1 - DISSIMILAR_CHANCE) (30%) similar — not just on average, but
+    // as an exact per-draw probability, same guarantee as the original
+    // 50/50 coin flip had.
+    const wantDissimilar = Math.random() < DISSIMILAR_CHANCE;
+    d = wantDissimilar
+      ? (() => { let x; do { x = randInt(1, 9); } while(x === b); return x; })()
+      : b;
   } else {
     d = randInt(1, 9);
   }
