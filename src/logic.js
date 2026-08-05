@@ -22,12 +22,29 @@ export function randInt(min, max){
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-/* Appends a "Simplify" (or "Reduce to a whole number") row to cells/rows,
-   if the raw result actually simplifies. If the fully-reduced fraction has
-   a denominator of 1 (e.g. 6/2 -> 3), only a single whole-number cell is
-   asked for instead of a numerator/denominator pair. Mutates cells & rows
-   in place; does nothing if the result is already in lowest terms. */
-export function appendSimplifyStep(cells, rows, resultNum, resultDen){
+/* Appends a "Simplify" (or "Reduce to a whole number") step to cells/rows,
+   if the raw result actually simplifies. Mutates cells & rows in place;
+   does nothing if the result is already in lowest terms.
+
+   resultNumCellIndex/resultDenCellIndex are the cellIndex of the ALREADY
+   -solved result cells one row up (every call site's "Result"/"Multiply
+   across" row) — needed so the new GCF row can point back at them rather
+   than re-asking for numbers the player just typed a moment ago.
+
+   Two cases:
+     - Reduces to a whole number (e.g. 6/2 -> 3): unchanged from before —
+       a single whole-number cell, no GCF step. Kept simple deliberately;
+       there's no meaningful "divide numerator and denominator by the
+       GCF" framing once the denominator disappears entirely.
+     - Reduces to a smaller fraction (e.g. 2/12 -> 1/6): finds the GCF
+       first (the ONE new tappable point), then a pure restatement row
+       showing resultNum/resultDen divided by that GCF — reusing the
+       already-solved resultNum/resultDen cells and the just-solved GCF
+       cell, so it costs zero additional taps, same pattern as the LCD
+       cell reappearing across multiple rows on the dissimilar board —
+       and only then the two real blanks for the simplified result,
+       exactly as before. */
+export function appendSimplifyStep(cells, rows, resultNum, resultDen, resultNumCellIndex, resultDenCellIndex){
   const [simpNum, simpDen] = reduce(resultNum, resultDen);
   const reducible = simpDen !== resultDen || Math.abs(simpNum) !== Math.abs(resultNum);
   if(!reducible) return;
@@ -40,17 +57,35 @@ export function appendSimplifyStep(cells, rows, resultNum, resultDen){
       caption: 'Simplify to a whole number',
       value: { type: 'cell', cellIndex: idx },
     });
-  } else {
-    const numIdx = cells.length;
-    cells.push({ key: 'simpNum', label: 'simplified numerator', correct: simpNum });
-    const denIdx = cells.length;
-    cells.push({ key: 'simpDen', label: 'simplified denominator', correct: simpDen });
-    rows.push({
-      caption: 'Simplify',
-      numerator: [ { type: 'cell', cellIndex: numIdx } ],
-      denominator: [ { type: 'cell', cellIndex: denIdx } ],
-    });
+    return;
   }
+
+  const g = gcd(resultNum, resultDen); // gcd() already works on magnitudes internally
+
+  const gcfIdx = cells.length;
+  cells.push({ key: 'gcf', label: 'GCF of the numerator and denominator', correct: g });
+
+  rows.push({
+    kind: 'whole',
+    caption: 'Find the GCF of the numerator and denominator',
+    value: { type: 'cell', cellIndex: gcfIdx },
+  });
+
+  rows.push({
+    caption: 'Divide both by the GCF',
+    numerator: [ { type: 'cell', cellIndex: resultNumCellIndex }, { type: 'op', symbol: '\u00F7' }, { type: 'cell', cellIndex: gcfIdx } ],
+    denominator: [ { type: 'cell', cellIndex: resultDenCellIndex }, { type: 'op', symbol: '\u00F7' }, { type: 'cell', cellIndex: gcfIdx } ],
+  });
+
+  const numIdx = cells.length;
+  cells.push({ key: 'simpNum', label: 'simplified numerator', correct: simpNum });
+  const denIdx = cells.length;
+  cells.push({ key: 'simpDen', label: 'simplified denominator', correct: simpDen });
+  rows.push({
+    caption: 'Simplified fraction',
+    numerator: [ { type: 'cell', cellIndex: numIdx } ],
+    denominator: [ { type: 'cell', cellIndex: denIdx } ],
+  });
 }
 
 /* =========================================================
@@ -131,7 +166,7 @@ export function buildSimilarFractionsLayout(problem){
     },
   ];
 
-  appendSimplifyStep(cells, rows, resultNum, denom);
+  appendSimplifyStep(cells, rows, resultNum, denom, 3, DENOM);
 
   return { cells, render: 'crossMultiply', rows };
 }
@@ -156,7 +191,7 @@ export function buildMultiplicationLayout(problem){
     },
   ];
 
-  appendSimplifyStep(cells, rows, resultNum, resultDen);
+  appendSimplifyStep(cells, rows, resultNum, resultDen, 0, 1);
 
   return { cells, render: 'crossMultiply', rows };
 }
@@ -195,7 +230,7 @@ export function buildDivisionLayout(problem){
     },
   ];
 
-  appendSimplifyStep(cells, rows, resultNum, resultDen);
+  appendSimplifyStep(cells, rows, resultNum, resultDen, 4, 5);
 
   return { cells, render: 'crossMultiply', rows };
 }
@@ -253,7 +288,7 @@ export function buildDissimilarAddSubLayout(problem){
     },
   ];
 
-  appendSimplifyStep(cells, rows, resultNum, lcd);
+  appendSimplifyStep(cells, rows, resultNum, lcd, 7, DENOM);
 
   return { cells, render: 'crossMultiply', rows };
 }
