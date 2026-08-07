@@ -28,7 +28,7 @@ const state = {
   timerId: null,         // setInterval handle
 
   // Online play
-  onlineChoice: null,    // 'create' | 'join'
+  onlineChoice: null,    // 'create' | 'join' | 'find'
   isOnline: false,
   roomCode: null,
   myRole: null,          // 'host' | 'guest'
@@ -37,6 +37,11 @@ const state = {
   stopPresence: null, // cleanup function from trackPresence(), for the real player's own connection
   missLog: [], // wrong-attempt records for the current game, for the post-game review
   rematchFinalizing: false, // guards against the host double-triggering resetRoomForRematch
+
+  // "Find Opponent" lobby (browsing waiting rooms instead of typing a code)
+  unsubscribeLobby: null,
+  lobbyTickId: null,     // setInterval handle — re-renders "waiting Xm ago" even between snapshots
+  lastLobbyRooms: null,  // most recent /rooms snapshot, reused by the tick above
 
   // Teacher spectator view
   spectating: false,         // true while watching someone else's online game, read-only
@@ -73,8 +78,11 @@ const el = {
   stepOnlineChoice: document.getElementById('step-online-choice'),
   onlineCreateBtn: document.getElementById('online-create-btn'),
   onlineJoinBtn: document.getElementById('online-join-btn'),
+  onlineFindBtn: document.getElementById('online-find-btn'),
   stepJoinCode: document.getElementById('step-join-code'),
   joinCodeInput: document.getElementById('join-code-input'),
+  stepFindOpponent: document.getElementById('step-find-opponent'),
+  lobbyList: document.getElementById('lobby-list'),
 
   waitingModal: document.getElementById('waiting-modal'),
   instructionsModal: document.getElementById('instructions-modal'),
@@ -203,6 +211,7 @@ el.reviewModal.addEventListener('click', (e) => {
 
 el.onlineCreateBtn.addEventListener('click', () => selectOnlineChoice('create'));
 el.onlineJoinBtn.addEventListener('click', () => selectOnlineChoice('join'));
+el.onlineFindBtn.addEventListener('click', () => selectOnlineChoice('find'));
 
 el.watchGamesBtn.addEventListener('click', () => {
   el.teacherPinInput.value = '';
@@ -247,11 +256,13 @@ el.opChoices.forEach(cb => {
 function selectMode(mode){
   state.mode = mode;
   state.onlineChoice = null;
+  closeLobby(); // leaving/changing mode — stop listening if we were browsing the lobby
   el.modeSolo.classList.toggle('selected', mode === 'solo');
   el.modeVs.classList.toggle('selected', mode === 'vs');
   el.modeOnline.classList.toggle('selected', mode === 'online');
   el.onlineCreateBtn.classList.remove('selected');
   el.onlineJoinBtn.classList.remove('selected');
+  el.onlineFindBtn.classList.remove('selected');
   el.setupError.textContent = '';
   updateStepVisibility();
 }
@@ -260,8 +271,10 @@ function selectOnlineChoice(choice){
   state.onlineChoice = choice;
   el.onlineCreateBtn.classList.toggle('selected', choice === 'create');
   el.onlineJoinBtn.classList.toggle('selected', choice === 'join');
+  el.onlineFindBtn.classList.toggle('selected', choice === 'find');
   el.setupError.textContent = '';
   updateStepVisibility();
+  if(choice === 'find') openLobby(); else closeLobby();
 }
 
 /* Central place that decides which setup fields are visible, based on
@@ -272,18 +285,22 @@ function updateStepVisibility(){
   el.stepName2.classList.toggle('hidden', mode !== 'vs');
   el.stepOnlineChoice.classList.toggle('hidden', mode !== 'online');
   el.stepJoinCode.classList.toggle('hidden', !(mode === 'online' && onlineChoice === 'join'));
+  el.stepFindOpponent.classList.toggle('hidden', !(mode === 'online' && onlineChoice === 'find'));
 
   // Operations/pair-count/negatives/time-control: local modes always show
-  // them; online only shows them once "Create Game" is chosen (the guest
-  // inherits whatever the host picked, so they don't choose anything).
+  // them; online only shows them once "Create Game" is chosen (a guest —
+  // whether joining by code or by challenging from the lobby — inherits
+  // whatever the host picked, so they don't choose anything).
   const showHostSettings = (mode === 'solo' || mode === 'vs') || (mode === 'online' && onlineChoice === 'create');
   el.stepOperations.classList.toggle('hidden', !showHostSettings);
   el.stepNegatives.classList.toggle('hidden', !showHostSettings);
   el.stepPairCount.classList.toggle('hidden', !showHostSettings);
   el.stepTimeControl.classList.toggle('hidden', !showHostSettings);
 
-  // Start button: only appears once we know what it should do.
-  const ready = mode === 'solo' || mode === 'vs' || (mode === 'online' && onlineChoice);
+  // Start button: only appears once we know what it should do. "Find
+  // Opponent" has no single submit action — each lobby row has its own
+  // Challenge button — so the generic Start button stays hidden for it.
+  const ready = mode === 'solo' || mode === 'vs' || (mode === 'online' && onlineChoice && onlineChoice !== 'find');
   el.startBtn.classList.toggle('hidden', !ready);
   if(mode === 'online'){
     el.startBtn.textContent = onlineChoice === 'join' ? 'Join Room' : 'Create Room';
@@ -361,6 +378,7 @@ function resetToSetup(){
   leaveOnlineRoom();
   stopSpectating(false);
   closeWatchList();
+  closeLobby();
   el.teacherPinModal.classList.add('hidden');
   state.missLog = [];
   state.rematchFinalizing = false;
@@ -385,6 +403,7 @@ function resetToSetup(){
   el.modeOnline.classList.remove('selected');
   el.onlineCreateBtn.classList.remove('selected');
   el.onlineJoinBtn.classList.remove('selected');
+  el.onlineFindBtn.classList.remove('selected');
   el.joinCodeInput.value = '';
   updateStepVisibility();
 }
@@ -493,6 +512,113 @@ async function handleJoinGame(){
     el.setupError.textContent = err.message || 'Could not join that room.';
   } finally {
     el.startBtn.disabled = false;
+  }
+}
+
+/* =========================================================
+   "Find Opponent" lobby — browse currently-waiting rooms and challenge
+   one instead of typing a code. Reuses the same listenToAllRooms() feed
+   that powers the teacher's Watch Games list, filtered to just the
+   still-open ones, and reuses joinRoom() itself (now transaction-backed —
+   see online.js — so two people tapping Challenge on the same row within
+   the same instant can't both win the seat).
+   ========================================================= */
+
+function openLobby(){
+  if(!state.unsubscribeLobby){
+    state.unsubscribeLobby = listenToAllRooms(renderLobby);
+  }
+  // The list only re-renders when a room actually changes in Firebase, so
+  // without this a "waiting 1m ago" label would just sit there frozen for
+  // as long as nothing else happens anywhere in /rooms. This ticks it
+  // forward independent of that.
+  if(!state.lobbyTickId){
+    state.lobbyTickId = setInterval(() => {
+      if(state.lastLobbyRooms) renderLobby(state.lastLobbyRooms);
+    }, 30000);
+  }
+}
+
+function closeLobby(){
+  if(state.unsubscribeLobby){
+    state.unsubscribeLobby();
+    state.unsubscribeLobby = null;
+  }
+  if(state.lobbyTickId){
+    clearInterval(state.lobbyTickId);
+    state.lobbyTickId = null;
+  }
+  state.lastLobbyRooms = null;
+}
+
+function formatWaitingSince(createdAt){
+  if(!createdAt) return 'just now';
+  const mins = Math.round((Date.now() - createdAt) / 60000);
+  return mins < 1 ? 'just now' : `waiting ${mins}m`;
+}
+
+function renderLobby(roomsObj){
+  state.lastLobbyRooms = roomsObj;
+  pruneStaleRooms(roomsObj).catch(() => { /* best-effort; next snapshot will retry */ });
+
+  const rooms = Object.entries(roomsObj || {})
+    .filter(([, room]) => room && room.status === 'waiting' && !isRoomStale(room))
+    .sort(([, a], [, b]) => (a.createdAt || 0) - (b.createdAt || 0)); // longest-waiting first
+
+  if(rooms.length === 0){
+    el.lobbyList.innerHTML = '<p class="watch-empty">No one is waiting for an opponent right now.</p>';
+    return;
+  }
+
+  el.lobbyList.innerHTML = rooms.map(([code, room]) => {
+    const host = room.players?.host;
+    if(!host) return ''; // malformed/partial room, skip defensively
+
+    const opsLabel = (room.settings?.allowedOps || []).join(' ');
+    const negLabel = room.settings?.allowNegatives ? ' \u00B7 negatives' : '';
+    const timerLabel = room.settings?.timeControlSeconds > 0
+      ? ` \u00B7 ${formatTime(room.settings.timeControlSeconds)}/turn`
+      : '';
+
+    return `
+      <div class="watch-row">
+        <div class="watch-row-info">
+          <span class="watch-room-names">${host.name}</span>
+          <span class="watch-room-progress">${opsLabel}${negLabel}${timerLabel} \u00B7 ${formatWaitingSince(room.createdAt)}</span>
+        </div>
+        <button class="secondary-btn watch-row-btn" data-room-code="${code}" type="button">Challenge</button>
+      </div>`;
+  }).join('');
+
+  el.lobbyList.querySelectorAll('.watch-row-btn').forEach(btn => {
+    btn.addEventListener('click', () => handleChallenge(btn.dataset.roomCode));
+  });
+}
+
+async function handleChallenge(code){
+  const name1 = el.player1Name.value.trim();
+  if(!name1){
+    el.setupError.textContent = 'Please enter your name.';
+    return;
+  }
+  el.setupError.textContent = '';
+  try{
+    await joinRoom(code, name1);
+    closeLobby();
+    state.isOnline = true;
+    state.roomCode = code;
+    state.myRole = 'guest';
+    state.mode = 'online';
+    state.timeControlSeconds = 0;
+
+    saveSeat(code, 'guest', name1);
+    state.stopPresence = trackPresence(code, 'guest');
+    state.unsubscribeRoom = listenToRoom(code, onRoomUpdate);
+  } catch (err){
+    // Someone else likely grabbed that seat first — the live listener
+    // will already have dropped the room from the list by now, so just
+    // surface why and let them pick someone else.
+    el.setupError.textContent = err.message || 'Could not join that room — try another.';
   }
 }
 
@@ -861,6 +987,15 @@ function formatAccuracy(player){
   return Math.round((correct / total) * 100) + '%';
 }
 
+/* The most a player could have scored: every tap they personally made
+   landing correct. Since score is +1/correct, -1/wrong, this is just
+   their total tap count (correctCount + wrongCount) — score can never
+   exceed it. Reused wherever we show "X pts" at game end so it becomes
+   "X out of Y pts". */
+function maxPossibleScore(player){
+  return (player.correctCount || 0) + (player.wrongCount || 0);
+}
+
 function updateTimerDisplay(){
   if(state.timeControlSeconds <= 0) return;
 
@@ -891,11 +1026,11 @@ function handleTimeOut(playerIndex){
 
   if(state.mode === 'solo'){
     el.winnerHeading.textContent = "Time's up!";
-    el.winnerDetail.textContent = `${timedOutPlayer.name}, you ran out of time with a score of ${timedOutPlayer.score}.\nAccuracy: ${formatAccuracy(timedOutPlayer)}`;
+    el.winnerDetail.textContent = `${timedOutPlayer.name}, you ran out of time with a score of ${timedOutPlayer.score} out of ${maxPossibleScore(timedOutPlayer)} possible.\nAccuracy: ${formatAccuracy(timedOutPlayer)}`;
   } else {
     const winner = state.players[playerIndex === 0 ? 1 : 0];
     el.winnerHeading.textContent = `${winner.name} wins on time!`;
-    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${state.players[0].name}: ${state.players[0].score} pts, ${formatAccuracy(state.players[0])} accuracy\n${state.players[1].name}: ${state.players[1].score} pts, ${formatAccuracy(state.players[1])} accuracy`;
+    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${state.players[0].name}: ${state.players[0].score}/${maxPossibleScore(state.players[0])} pts, ${formatAccuracy(state.players[0])} accuracy\n${state.players[1].name}: ${state.players[1].score}/${maxPossibleScore(state.players[1])} pts, ${formatAccuracy(state.players[1])} accuracy`;
   }
 }
 
@@ -982,7 +1117,7 @@ function getOnlineResultText(room){
     const winner = timedOutRole === 'host' ? guestP : hostP;
     return {
       heading: `${winner.name} wins on time!`,
-      detail: `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score} pts, ${formatAccuracy(guestP)} accuracy`,
+      detail: `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
     };
   }
 
@@ -997,12 +1132,12 @@ function getOnlineResultText(room){
       const loserTime = hostTime > guestTime ? guestTime : hostTime;
       return {
         heading: `${winner.name} wins the tiebreaker!`,
-        detail: `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(Math.round(winnerTime))} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${formatTime(Math.round(loserTime))} remaining, ${formatAccuracy(loser)} accuracy`,
+        detail: `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatTime(Math.round(winnerTime))} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatTime(Math.round(loserTime))} remaining, ${formatAccuracy(loser)} accuracy`,
       };
     }
     return {
       heading: "It's a tie!",
-      detail: `${hostP.name} and ${guestP.name} both scored ${hostP.score}.\n${hostP.name}: ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${formatAccuracy(guestP)} accuracy`,
+      detail: `${hostP.name} and ${guestP.name} both scored ${hostP.score}.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
     };
   }
 
@@ -1010,7 +1145,7 @@ function getOnlineResultText(room){
   const loser = hostP.score > guestP.score ? guestP : hostP;
   return {
     heading: `${winner.name} wins!`,
-    detail: `${winner.name}: ${winner.score} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score} pts, ${formatAccuracy(loser)} accuracy`,
+    detail: `${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatAccuracy(loser)} accuracy`,
   };
 }
 
@@ -1677,7 +1812,7 @@ function showWinner(){
   if(state.mode === 'solo'){
     const p = state.players[0];
     el.winnerHeading.textContent = 'Nice work!';
-    el.winnerDetail.textContent = `${p.name}, you finished with a score of ${p.score}.\nAccuracy: ${formatAccuracy(p)}`;
+    el.winnerDetail.textContent = `${p.name}, you finished with a score of ${p.score} out of ${maxPossibleScore(p)} possible.\nAccuracy: ${formatAccuracy(p)}`;
   } else {
     const [p1, p2] = state.players;
     let heading, detail;
@@ -1687,16 +1822,16 @@ function showWinner(){
         const winner = p1.timeRemaining > p2.timeRemaining ? p1 : p2;
         const loser = p1.timeRemaining > p2.timeRemaining ? p2 : p1;
         heading = `${winner.name} wins the tiebreaker!`;
-        detail = `Tied at ${p1.score} points — ${winner.name} had more time left.\n${winner.name}: ${formatTime(winner.timeRemaining)} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${formatTime(loser.timeRemaining)} remaining, ${formatAccuracy(loser)} accuracy`;
+        detail = `Tied at ${p1.score} points — ${winner.name} had more time left.\n${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatTime(winner.timeRemaining)} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatTime(loser.timeRemaining)} remaining, ${formatAccuracy(loser)} accuracy`;
       } else {
         heading = "It's a tie!";
-        detail = `${p1.name} and ${p2.name} both scored ${p1.score}.\n${p1.name}: ${formatAccuracy(p1)} accuracy\n${p2.name}: ${formatAccuracy(p2)} accuracy`;
+        detail = `${p1.name} and ${p2.name} both scored ${p1.score}.\n${p1.name}: ${p1.score}/${maxPossibleScore(p1)} pts, ${formatAccuracy(p1)} accuracy\n${p2.name}: ${p2.score}/${maxPossibleScore(p2)} pts, ${formatAccuracy(p2)} accuracy`;
       }
     } else {
       const winner = p1.score > p2.score ? p1 : p2;
       const loser = p1.score > p2.score ? p2 : p1;
       heading = `${winner.name} wins!`;
-      detail = `${winner.name}: ${winner.score} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score} pts, ${formatAccuracy(loser)} accuracy`;
+      detail = `${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatAccuracy(loser)} accuracy`;
     }
     el.winnerHeading.textContent = heading;
     el.winnerDetail.textContent = detail;

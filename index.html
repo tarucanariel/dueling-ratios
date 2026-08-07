@@ -48,15 +48,21 @@
 
     <div class="setup-step hidden" id="step-online-choice">
       <label>Online play</label>
-      <div class="choice-row">
+      <div class="choice-row choice-row-3">
         <button class="choice-btn" id="online-create-btn" data-online-choice="create">Create Game</button>
         <button class="choice-btn" id="online-join-btn" data-online-choice="join">Join Game</button>
+        <button class="choice-btn" id="online-find-btn" data-online-choice="find">Find Opponent</button>
       </div>
     </div>
 
     <div class="setup-step hidden" id="step-join-code">
       <label for="join-code-input">Room code</label>
       <input type="text" id="join-code-input" maxlength="4" placeholder="e.g. 7XQ2" autocomplete="off" class="code-input">
+    </div>
+
+    <div class="setup-step hidden" id="step-find-opponent">
+      <label>Players waiting for an opponent</label>
+      <div class="watch-list-body lobby-list" id="lobby-list"></div>
     </div>
 
     <div class="setup-step" id="step-operations">

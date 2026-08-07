@@ -47,7 +47,7 @@
    keeps payloads small and reuses all the existing pure logic as-is.
    ========================================================= */
 
-import { ref, set, get, update, remove, onValue, off, onDisconnect, serverTimestamp } from "firebase/database";
+import { ref, set, get, update, remove, onValue, off, onDisconnect, serverTimestamp, runTransaction } from "firebase/database";
 import { db, ensureSignedIn } from "./firebase.js";
 import { generateProblem, buildProblemLayout, buildPool } from "./logic.js";
 
@@ -116,32 +116,46 @@ export async function createRoom(hostName, settings){
   return code;
 }
 
+/* Runs as a Firebase transaction rather than a plain read-then-write —
+   a manually-typed code was only ever known by two people, so a race
+   was near-impossible, but a public lobby (see listenToAllRooms) means
+   multiple strangers can tap "Challenge" on the same waiting room within
+   the same second. The transaction guarantees only one of them actually
+   claims it; everyone else gets a clean, accurate error instead of a
+   silently-clobbered write. */
 export async function joinRoom(code, guestName){
   await ensureSignedIn();
   const roomRef = ref(db, 'rooms/' + code);
-  const snap = await get(roomRef);
 
-  if(!snap.exists()){
-    throw new Error('Room not found. Check the code and try again.');
-  }
-  const room = snap.val();
-  if(room.status !== 'waiting'){
+  let failReason = null; // set inside the transaction so the catch below can report *why* it aborted
+  const result = await runTransaction(roomRef, (room) => {
+    if(room === null){
+      failReason = 'notfound';
+      return; // abort — nothing to commit
+    }
+    if(room.status !== 'waiting'){
+      failReason = 'taken';
+      return; // abort — someone beat us to it (or it's not joinable for some other reason)
+    }
+
+    room.players = room.players || {};
+    room.players.guest = { name: guestName, score: 0, correctCount: 0, wrongCount: 0 };
+    room.status = 'active';
+    room.lastActivityAt = Date.now();
+
+    // Start the clock now — not at room creation, so the host waiting
+    // alone for someone to join doesn't silently burn their own time.
+    if(room.settings?.timeControlSeconds > 0){
+      room.turnDeadline = Date.now() + room.timeRemaining.host * 1000; // turn starts with host
+    }
+
+    return room;
+  });
+
+  if(!result.committed){
+    if(failReason === 'notfound') throw new Error('Room not found. Check the code and try again.');
     throw new Error('This room already has two players.');
   }
-
-  const updates = {
-    'players/guest': { name: guestName, score: 0, correctCount: 0, wrongCount: 0 },
-    status: 'active',
-    lastActivityAt: Date.now(),
-  };
-
-  // Start the clock now — not at room creation, so the host waiting
-  // alone for someone to join doesn't silently burn their own time.
-  if(room.settings.timeControlSeconds > 0){
-    updates.turnDeadline = Date.now() + room.timeRemaining.host * 1000; // turn starts with host
-  }
-
-  await update(roomRef, updates);
 }
 
 /* Registers this browser's live connection as `role` (host/guest) in

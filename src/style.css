@@ -370,6 +370,16 @@ body{
   padding:9px 16px;
 }
 
+/* Lobby list ("Find Opponent") reuses the watch-list-body/watch-row look
+   above, but it lives inline inside the setup card rather than its own
+   modal, so it gets its own scroll cap to keep a long list from pushing
+   the rest of the setup card off-screen. */
+.lobby-list{
+  max-height:40vh;
+  overflow-y:auto;
+  padding-right:2px;
+}
+
 /* ---------- Spectate bar ---------- */
 .spectate-bar{
   display:flex;
