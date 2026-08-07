@@ -9,6 +9,14 @@
        players: { host: {name,score}, guest?: {name,score} }
        turn: "host" | "guest"
        pairIndex, problem, cellIndex, pool
+       pendingChallenge?: { name, requestedAt, requestId } — set while a
+         lobby "Challenge" is awaiting the host's Accept/Decline (see
+         sendChallenge/acceptChallenge/clearChallenge below). Only
+         present on a "waiting" room, and only one at a time — a fresh
+         challenge on a room that already has one fails outright rather
+         than queuing. A typed-room-code join (joinRoom) never touches
+         this field at all — it claims the seat in one step, since
+         already knowing the code is treated as implicit consent.
        timeRemaining: { host: seconds, guest: seconds } — "banked" time for
          whoever ISN'T currently active; the active player's true remaining
          time is always computed fresh as (turnDeadline - now), never stored
@@ -116,6 +124,23 @@ export async function createRoom(hostName, settings){
   return code;
 }
 
+/* Firebase RTDB gotcha, not specific to this app: a transaction's update
+   function can be invoked with `room === null` on its very first call
+   purely because that path isn't cached locally yet — not because the
+   data doesn't actually exist on the server (e.g. someone typing a room
+   code they've never seen before, versus a lobby browser who already
+   has the whole /rooms tree cached). A plain get() right before the
+   transaction is a cheap, common way to warm the local cache so that
+   first call is more likely to already have real data, cutting down on
+   retries. It's a latency nicety, though, not a correctness requirement —
+   every transaction below handles a null room by echoing it through
+   rather than assuming "not found," which is what actually makes them
+   correct regardless of whether this warm-up landed in time; see the
+   comment on room===null inside joinRoom() for the full explanation. */
+async function warmRoomCache(roomRef){
+  try{ await get(roomRef); } catch (err){ /* best-effort — the transaction below is correct either way */ }
+}
+
 /* Runs as a Firebase transaction rather than a plain read-then-write —
    a manually-typed code was only ever known by two people, so a race
    was near-impossible, but a public lobby (see listenToAllRooms) means
@@ -126,16 +151,28 @@ export async function createRoom(hostName, settings){
 export async function joinRoom(code, guestName){
   await ensureSignedIn();
   const roomRef = ref(db, 'rooms/' + code);
+  await warmRoomCache(roomRef); // cheap latency win in the common case — see warmRoomCache() above. Correctness below no longer depends on this actually working, though — see the room===null handling next.
 
   let failReason = null; // set inside the transaction so the catch below can report *why* it aborted
   const result = await runTransaction(roomRef, (room) => {
     if(room === null){
-      failReason = 'notfound';
-      return; // abort — nothing to commit
+      // IMPORTANT: do NOT hard-abort here (i.e. do NOT `return;`/undefined).
+      // A transaction's first invocation can see null purely because this
+      // path isn't cached locally yet — not because the room doesn't
+      // exist. Returning `room` (null) UNCHANGED, instead of aborting,
+      // hands this off to Firebase's own conflict detection: it's really
+      // a "write null" attempt, which the server only actually commits
+      // if its real current value still matches null. If the room
+      // genuinely exists, that mismatch is detected server-side and
+      // Firebase automatically retries this function with the real,
+      // verified data — no guesswork or cache assumptions needed on our
+      // end. Only once we're looking at trustworthy (real or genuinely-
+      // null) data do the checks below mean anything.
+      return room;
     }
     if(room.status !== 'waiting'){
       failReason = 'taken';
-      return; // abort — someone beat us to it (or it's not joinable for some other reason)
+      return; // abort — this is real, verified data: someone beat us to it (or it's not joinable for some other reason)
     }
 
     room.players = room.players || {};
@@ -153,9 +190,187 @@ export async function joinRoom(code, guestName){
   });
 
   if(!result.committed){
-    if(failReason === 'notfound') throw new Error('Room not found. Check the code and try again.');
     throw new Error('This room already has two players.');
   }
+  if(result.snapshot.val() === null){
+    // Committed, but the FINAL, server-verified state is genuinely null —
+    // this is now a trustworthy "the room really doesn't exist," not a
+    // caching artifact (see the null-handling above).
+    throw new Error('Room not found. Check the code and try again.');
+  }
+}
+
+/* =========================================================
+   Lobby "Challenge" flow (accept/decline)
+
+   Unlike joinRoom() above — used for a typed room code, where already
+   knowing the code is treated as implicit consent to join instantly —
+   a lobby challenge asks the host first. It's a two-step handshake:
+
+     1. sendChallenge() stakes a claim: writes room.pendingChallenge,
+        but leaves status/players untouched. The room stays 'waiting'
+        and stays visible to (other) lobby browsers.
+     2. The host either:
+          - acceptChallenge() — does the actual seat-claiming (same
+            shape as joinRoom's transaction), keyed to the specific
+            pendingChallenge.requestId so a stale/replaced challenge
+            can't accidentally get accepted.
+          - clearChallenge() — declines it (or the challenger cancels,
+            or a client-side timeout fires) — just clears
+            pendingChallenge, reopening the room to other challengers.
+
+   Only one pending challenge is allowed on a room at a time (a fresh
+   sendChallenge() while one's already outstanding fails with 'busy') —
+   simpler for both players to reason about than a queue, at the cost of
+   later challengers needing to retry.
+   ========================================================= */
+
+// How long a host has to accept/decline before it auto-expires. Enforced
+// both client-side (the challenger's own countdown, see main.js) and via
+// pruneStaleChallenges() below as a safety net for a challenger whose tab
+// closed before their own timer could fire.
+export const CHALLENGE_TIMEOUT_MS = 45 * 1000;
+
+function generateRequestId(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+export async function sendChallenge(code, challengerName){
+  await ensureSignedIn();
+  const roomRef = ref(db, 'rooms/' + code);
+  await warmRoomCache(roomRef); // cheap latency win — see the room===null handling below for why correctness doesn't depend on this
+  const requestId = generateRequestId();
+
+  let failReason = null;
+  const result = await runTransaction(roomRef, (room) => {
+    // See joinRoom()'s room===null comment above for why this echoes
+    // `room` unchanged rather than hard-aborting: it lets Firebase's own
+    // conflict detection confirm whether this is real or just a
+    // not-yet-cached placeholder, instead of us guessing.
+    if(room === null) return room;
+    if(room.status !== 'waiting'){ failReason = 'taken'; return; }
+    if(room.pendingChallenge && (Date.now() - room.pendingChallenge.requestedAt) < CHALLENGE_TIMEOUT_MS){
+      failReason = 'busy';
+      return; // someone else's challenge is still live on this room
+    }
+
+    room.pendingChallenge = { name: challengerName, requestedAt: Date.now(), requestId };
+    room.lastActivityAt = Date.now();
+    return room;
+  });
+
+  if(!result.committed){
+    if(failReason === 'busy') throw new Error('Someone else is already challenging this player \u2014 try again shortly.');
+    throw new Error('This room already has two players.');
+  }
+  if(result.snapshot.val() === null){
+    throw new Error('Room not found. Check the code and try again.');
+  }
+  return requestId;
+}
+
+/* Host taps Accept. requestId must match the room's current
+   pendingChallenge — guards against acting on a challenge that's
+   already expired/been replaced since the Accept button was rendered. */
+export async function acceptChallenge(code, requestId){
+  await ensureSignedIn();
+  const roomRef = ref(db, 'rooms/' + code);
+  await warmRoomCache(roomRef); // cheap latency win — see the room===null handling below for why correctness doesn't depend on this
+
+  let failReason = null;
+  const result = await runTransaction(roomRef, (room) => {
+    // See joinRoom()'s room===null comment above.
+    if(room === null) return room;
+    if(room.status !== 'waiting' || !room.pendingChallenge || room.pendingChallenge.requestId !== requestId){
+      failReason = 'stale';
+      return;
+    }
+
+    room.players = room.players || {};
+    room.players.guest = { name: room.pendingChallenge.name, score: 0, correctCount: 0, wrongCount: 0 };
+    room.status = 'active';
+    room.pendingChallenge = null;
+    room.lastActivityAt = Date.now();
+    if(room.settings?.timeControlSeconds > 0){
+      room.turnDeadline = Date.now() + room.timeRemaining.host * 1000;
+    }
+    return room;
+  });
+
+  if(!result.committed){
+    throw new Error('That challenge is no longer available.');
+  }
+  if(result.snapshot.val() === null){
+    throw new Error('Room not found.');
+  }
+}
+
+/* Clears a pendingChallenge if it's still THIS request — covers three
+   callers uniformly (host declines / challenger cancels / challenger's
+   timeout fires), all a safe no-op if it's already gone for any reason.
+
+   Returns the room as it stood the instant this transaction actually
+   committed. That matters for the cancel/timeout callers specifically:
+   if by the time this lands the room already shows status 'active', it
+   means Accept got there first — this call harmlessly did nothing (the
+   pendingChallenge was already cleared by acceptChallenge), and the
+   caller needs to know that so it can drop the challenger into the game
+   they were actually just placed into, rather than stranding them back
+   in the lobby while the host sits there alone. */
+export async function clearChallenge(code, requestId){
+  await ensureSignedIn();
+  const roomRef = ref(db, 'rooms/' + code);
+  await warmRoomCache(roomRef); // cheap latency win — see the room===null handling below for why correctness doesn't depend on this
+  const result = await runTransaction(roomRef, (room) => {
+    // See joinRoom()'s room===null comment above — echoing `room`
+    // unchanged here matters more than in most of the other functions
+    // in this file, since a wrongly-aborted "room's gone" would make
+    // the caller (see main.js's handleCancelChallenge) wrongly conclude
+    // a real, active game doesn't exist and strand the challenger back
+    // in the lobby instead of routing them into it.
+    if(room === null) return room;
+    if(room.pendingChallenge && room.pendingChallenge.requestId === requestId){
+      room.pendingChallenge = null;
+      room.lastActivityAt = Date.now();
+    }
+    return room;
+  });
+  return result.committed ? result.snapshot.val() : null;
+}
+
+/* Safety net, run alongside pruneStaleRooms() wherever the lobby/watch
+   list refreshes: catches a challenge left dangling because the
+   challenger's own tab closed before its local timeout could call
+   clearChallenge() itself. Without this, that one room would stay stuck
+   showing "already being challenged" to everyone else indefinitely. */
+export async function pruneStaleChallenges(roomsObj){
+  const now = Date.now();
+  const staleCodes = Object.entries(roomsObj || {})
+    .filter(([, room]) => room?.pendingChallenge && (now - room.pendingChallenge.requestedAt) > CHALLENGE_TIMEOUT_MS)
+    .map(([code]) => code);
+
+  await Promise.all(
+    staleCodes.map(async code => {
+      const roomRef = ref(db, 'rooms/' + code);
+      await warmRoomCache(roomRef); // cheap latency win — see the room===null handling below for why correctness doesn't depend on this
+      return runTransaction(roomRef, (room) => {
+        // See joinRoom()'s room===null comment for the general pattern.
+        // A transaction commit is a conditioned compare-and-swap: it only
+        // actually writes if the server's real current value still
+        // matches what this callback started from. Echoing `room`
+        // unchanged (even when it's null) is therefore safe, not a
+        // data-loss risk — if the room's real data differs from what we
+        // saw, Firebase detects that mismatch and retries this callback
+        // with the true data automatically, rather than blindly
+        // committing our stale guess over it.
+        if(room === null) return room;
+        if(room.pendingChallenge && (Date.now() - room.pendingChallenge.requestedAt) > CHALLENGE_TIMEOUT_MS){
+          room.pendingChallenge = null;
+        }
+        return room;
+      }).catch(() => { /* best-effort; next sweep will retry */ });
+    })
+  );
 }
 
 /* Registers this browser's live connection as `role` (host/guest) in
@@ -301,6 +516,7 @@ export async function resetRoomForRematch(code, settings){
     turnDeadline: t > 0 ? Date.now() + t * 1000 : null,
     missLog: [],
     rematch: { host: false, guest: false },
+    pendingChallenge: null,
     lastActivityAt: Date.now(),
   };
 

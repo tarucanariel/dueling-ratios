@@ -457,6 +457,38 @@ body{
   font-size:0.88rem;
 }
 
+/* ---------- Incoming lobby challenge (host's waiting screen) ---------- */
+.incoming-challenge{
+  padding:14px 16px;
+  margin:14px 0;
+  border-radius:var(--radius);
+  border:1px solid rgba(255,180,60,0.4);
+  background:rgba(255,180,60,0.12);
+}
+
+.incoming-challenge-text{
+  margin:0 0 10px;
+  color:var(--chalk);
+  font-size:0.92rem;
+  font-weight:600;
+  line-height:1.4;
+  text-align:center;
+}
+
+.incoming-challenge-actions{
+  display:flex;
+  gap:10px;
+}
+
+.incoming-challenge-actions .primary-btn,
+.incoming-challenge-actions .secondary-btn{
+  width:auto;
+  flex:1;
+  margin:0;
+  padding:10px;
+  font-size:0.88rem;
+}
+
 /* ---------- Instructions modal ---------- */
 .instructions-panel{
   max-width:560px;

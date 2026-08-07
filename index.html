@@ -225,7 +225,27 @@
     <p class="subtitle">Share this room code with the other player:</p>
     <div class="room-code-display" id="room-code-display">----</div>
     <p class="subtitle" id="waiting-note">They'll join automatically once they enter the code.</p>
+
+    <div class="incoming-challenge hidden" id="incoming-challenge">
+      <p class="incoming-challenge-text" id="incoming-challenge-text"></p>
+      <div class="incoming-challenge-actions">
+        <button class="primary-btn" id="accept-challenge-btn" type="button">Accept</button>
+        <button class="secondary-btn" id="decline-challenge-btn" type="button">Decline</button>
+      </div>
+    </div>
+    <p class="setup-error" id="waiting-error"></p>
+
     <button class="primary-btn" id="cancel-waiting-btn">Cancel</button>
+  </div>
+</div>
+
+<!-- Online: challenge sent from the lobby, waiting on the host to respond -->
+<div class="modal-overlay hidden" id="challenge-pending-modal">
+  <div class="modal chalk-panel">
+    <h2 class="game-title" style="font-size:1.8rem;">Challenge sent!</h2>
+    <p class="subtitle" id="challenge-pending-text">Waiting for a response&hellip;</p>
+    <p class="subtitle" id="challenge-pending-countdown">45s</p>
+    <button class="primary-btn" id="cancel-challenge-btn">Cancel</button>
   </div>
 </div>
 

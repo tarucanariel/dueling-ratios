@@ -1,6 +1,6 @@
 import './style.css';
 import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
-import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS } from './online.js';
+import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_PIN } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
 import { db } from './firebase.js';
@@ -42,6 +42,17 @@ const state = {
   unsubscribeLobby: null,
   lobbyTickId: null,     // setInterval handle — re-renders "waiting Xm ago" even between snapshots
   lastLobbyRooms: null,  // most recent /rooms snapshot, reused by the tick above
+
+  // Challenger's own "waiting for the host to respond" screen — separate
+  // from the real unsubscribeRoom/onRoomUpdate pair above, since we're
+  // not in the game yet and shouldn't touch game-rendering state while
+  // just watching to see if we got accepted.
+  challengeCode: null,
+  challengeRequestId: null,
+  challengeMyName: null,
+  unsubscribeChallengeWatch: null,
+  challengeTickId: null,    // setInterval handle for the visible countdown
+  challengeTimeoutId: null, // setTimeout handle for the client-side auto-expire
 
   // Teacher spectator view
   spectating: false,         // true while watching someone else's online game, read-only
@@ -91,6 +102,17 @@ const el = {
   creditsPhoto: document.getElementById('credits-photo'),
   roomCodeDisplay: document.getElementById('room-code-display'),
   cancelWaitingBtn: document.getElementById('cancel-waiting-btn'),
+
+  incomingChallenge: document.getElementById('incoming-challenge'),
+  incomingChallengeText: document.getElementById('incoming-challenge-text'),
+  acceptChallengeBtn: document.getElementById('accept-challenge-btn'),
+  declineChallengeBtn: document.getElementById('decline-challenge-btn'),
+  waitingError: document.getElementById('waiting-error'),
+
+  challengePendingModal: document.getElementById('challenge-pending-modal'),
+  challengePendingText: document.getElementById('challenge-pending-text'),
+  challengePendingCountdown: document.getElementById('challenge-pending-countdown'),
+  cancelChallengeBtn: document.getElementById('cancel-challenge-btn'),
 
   gameScreen: document.getElementById('game-screen'),
   chipP1: document.getElementById('chip-p1'),
@@ -186,6 +208,9 @@ el.startBtn.addEventListener('click', handlePrimaryButtonClick);
 el.rematchBtn.addEventListener('click', handleRematchClick);
 el.newGameBtn.addEventListener('click', resetToSetup);
 el.cancelWaitingBtn.addEventListener('click', cancelWaiting);
+el.acceptChallengeBtn.addEventListener('click', handleAcceptChallenge);
+el.declineChallengeBtn.addEventListener('click', handleDeclineChallenge);
+el.cancelChallengeBtn.addEventListener('click', handleCancelChallenge);
 
 el.instructionsBtn.addEventListener('click', () => {
   el.instructionsModal.classList.remove('hidden');
@@ -257,6 +282,7 @@ function selectMode(mode){
   state.mode = mode;
   state.onlineChoice = null;
   closeLobby(); // leaving/changing mode — stop listening if we were browsing the lobby
+  stopWatchingChallenge(); // ...and stop watching a pending challenge, if one was in flight
   el.modeSolo.classList.toggle('selected', mode === 'solo');
   el.modeVs.classList.toggle('selected', mode === 'vs');
   el.modeOnline.classList.toggle('selected', mode === 'online');
@@ -379,6 +405,7 @@ function resetToSetup(){
   stopSpectating(false);
   closeWatchList();
   closeLobby();
+  stopWatchingChallenge();
   el.teacherPinModal.classList.add('hidden');
   state.missLog = [];
   state.rematchFinalizing = false;
@@ -471,6 +498,7 @@ async function handleCreateGame(){
     el.roomCodeDisplay.textContent = code;
     el.setupModal.classList.add('hidden');
     el.waitingModal.classList.remove('hidden');
+    el.waitingError.textContent = '';
 
     saveSeat(code, 'host', name1);
     state.stopPresence = trackPresence(code, 'host');
@@ -560,6 +588,7 @@ function formatWaitingSince(createdAt){
 function renderLobby(roomsObj){
   state.lastLobbyRooms = roomsObj;
   pruneStaleRooms(roomsObj).catch(() => { /* best-effort; next snapshot will retry */ });
+  pruneStaleChallenges(roomsObj).catch(() => { /* best-effort; next snapshot will retry */ });
 
   const rooms = Object.entries(roomsObj || {})
     .filter(([, room]) => room && room.status === 'waiting' && !isRoomStale(room))
@@ -579,6 +608,7 @@ function renderLobby(roomsObj){
     const timerLabel = room.settings?.timeControlSeconds > 0
       ? ` \u00B7 ${formatTime(room.settings.timeControlSeconds)}/turn`
       : '';
+    const busy = room.pendingChallenge && (Date.now() - room.pendingChallenge.requestedAt) < CHALLENGE_TIMEOUT_MS;
 
     return `
       <div class="watch-row">
@@ -586,16 +616,16 @@ function renderLobby(roomsObj){
           <span class="watch-room-names">${host.name}</span>
           <span class="watch-room-progress">${opsLabel}${negLabel}${timerLabel} \u00B7 ${formatWaitingSince(room.createdAt)}</span>
         </div>
-        <button class="secondary-btn watch-row-btn" data-room-code="${code}" type="button">Challenge</button>
+        <button class="secondary-btn watch-row-btn" data-room-code="${code}" data-host-name="${host.name}" type="button" ${busy ? 'disabled' : ''}>${busy ? 'Being challenged\u2026' : 'Challenge'}</button>
       </div>`;
   }).join('');
 
-  el.lobbyList.querySelectorAll('.watch-row-btn').forEach(btn => {
-    btn.addEventListener('click', () => handleChallenge(btn.dataset.roomCode));
+  el.lobbyList.querySelectorAll('.watch-row-btn:not(:disabled)').forEach(btn => {
+    btn.addEventListener('click', () => handleChallenge(btn.dataset.roomCode, btn.dataset.hostName));
   });
 }
 
-async function handleChallenge(code){
+async function handleChallenge(code, hostName){
   const name1 = el.player1Name.value.trim();
   if(!name1){
     el.setupError.textContent = 'Please enter your name.';
@@ -603,23 +633,192 @@ async function handleChallenge(code){
   }
   el.setupError.textContent = '';
   try{
-    await joinRoom(code, name1);
+    const requestId = await sendChallenge(code, name1);
     closeLobby();
-    state.isOnline = true;
-    state.roomCode = code;
-    state.myRole = 'guest';
-    state.mode = 'online';
-    state.timeControlSeconds = 0;
-
-    saveSeat(code, 'guest', name1);
-    state.stopPresence = trackPresence(code, 'guest');
-    state.unsubscribeRoom = listenToRoom(code, onRoomUpdate);
+    openChallengePending(code, requestId, hostName, name1);
   } catch (err){
-    // Someone else likely grabbed that seat first — the live listener
-    // will already have dropped the room from the list by now, so just
-    // surface why and let them pick someone else.
-    el.setupError.textContent = err.message || 'Could not join that room — try another.';
+    // Someone else likely grabbed that seat/challenge slot first — the
+    // live lobby listener will already reflect it by now (either gone
+    // entirely, or shown as "Being challenged…"), so just surface why.
+    el.setupError.textContent = err.message || 'Could not challenge that player \u2014 try another.';
   }
+}
+
+/* The screen a challenger sits on after tapping Challenge, waiting for
+   the host to Accept/Decline. Watches the room live rather than polling,
+   and runs its own client-side countdown that auto-cancels the challenge
+   if the host never responds — see CHALLENGE_TIMEOUT_MS in online.js. */
+function openChallengePending(code, requestId, hostName, myName){
+  state.challengeCode = code;
+  state.challengeRequestId = requestId;
+  state.challengeMyName = myName;
+
+  el.setupModal.classList.add('hidden');
+  el.challengePendingModal.classList.remove('hidden');
+  el.challengePendingText.textContent = `Waiting for ${hostName} to respond\u2026`;
+
+  const deadline = Date.now() + CHALLENGE_TIMEOUT_MS;
+  updateChallengeCountdown(deadline);
+  state.challengeTickId = setInterval(() => updateChallengeCountdown(deadline), 1000);
+  state.challengeTimeoutId = setTimeout(handleChallengeTimedOut, CHALLENGE_TIMEOUT_MS);
+  state.unsubscribeChallengeWatch = listenToRoom(code, onChallengeRoomUpdate);
+}
+
+function updateChallengeCountdown(deadline){
+  const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  el.challengePendingCountdown.textContent = `${secs}s`;
+}
+
+/* Live updates while on the pending-response screen. Three outcomes to
+   watch for: accepted (status flips to 'active'), room vanished outright
+   (host cancelled while we waited), or our specific challenge is simply
+   gone while the room's still 'waiting' (declined, or beaten to expiry
+   by pruneStaleChallenges' safety net elsewhere). */
+function onChallengeRoomUpdate(room){
+  if(!room){
+    stopWatchingChallenge();
+    el.setupError.textContent = 'That room is no longer available.';
+    backToLobbyFromChallenge();
+    return;
+  }
+
+  if(room.status === 'active'){
+    const code = state.challengeCode;
+    const myName = state.challengeMyName;
+    stopWatchingChallenge();
+    enterAcceptedGame(code, myName);
+    return;
+  }
+
+  if(room.status === 'waiting' && (!room.pendingChallenge || room.pendingChallenge.requestId !== state.challengeRequestId)){
+    stopWatchingChallenge();
+    el.setupError.textContent = 'Your challenge was declined.';
+    backToLobbyFromChallenge();
+  }
+}
+
+async function handleChallengeTimedOut(){
+  const code = state.challengeCode;
+  const requestId = state.challengeRequestId;
+  const myName = state.challengeMyName;
+  if(!code || !requestId) return; // nothing actually in flight (defensive)
+
+  stopWatchingChallenge(); // stop reacting to further room updates — clearChallenge()'s own result is now the source of truth for what happened
+
+  let finalRoom = null;
+  try{ finalRoom = await clearChallenge(code, requestId); }
+  catch (err){ /* best-effort — falls through to "back to lobby" below */ }
+
+  if(finalRoom && finalRoom.status === 'active'){
+    enterAcceptedGame(code, myName); // lost the race — Accept landed a moment before our timeout did; honor it rather than strand them
+    return;
+  }
+
+  el.setupError.textContent = 'No response \u2014 you can try again.';
+  backToLobbyFromChallenge();
+}
+
+async function handleCancelChallenge(){
+  const code = state.challengeCode;
+  const requestId = state.challengeRequestId;
+  const myName = state.challengeMyName;
+  if(!code || !requestId) return; // nothing actually in flight (defensive)
+
+  // Disable immediately so a second click can't fire a second transaction
+  // while the first is still in flight, and so the player gets visible
+  // feedback that Cancel is actually doing something rather than nothing
+  // appearing to happen for the length of one network round-trip.
+  el.cancelChallengeBtn.disabled = true;
+  stopWatchingChallenge(); // stop reacting to further room updates — clearChallenge()'s own result is now the source of truth for what happened
+
+  let finalRoom = null;
+  try{ finalRoom = await clearChallenge(code, requestId); }
+  catch (err){ /* best-effort — falls through to "back to lobby" below */ }
+  el.cancelChallengeBtn.disabled = false;
+
+  if(finalRoom && finalRoom.status === 'active'){
+    // We lost the race: the host's Accept reached the server a moment
+    // before our Cancel did, so clearChallenge() above was a harmless
+    // no-op (there was nothing left to clear — acceptChallenge() had
+    // already cleared it). We WERE actually just placed into a real
+    // game with a real opponent waiting; sending this player back to
+    // the lobby instead would be a lie about what the database says
+    // actually happened, and would leave the host sitting there alone.
+    enterAcceptedGame(code, myName);
+    return;
+  }
+
+  backToLobbyFromChallenge();
+}
+
+/* Shared by both "lost the cancel/timeout race" paths above and the
+   normal accept-detected case in onChallengeRoomUpdate — all three are
+   the exact same transition into a just-accepted game. */
+function enterAcceptedGame(code, myName){
+  state.isOnline = true;
+  state.roomCode = code;
+  state.myRole = 'guest';
+  state.mode = 'online';
+  state.timeControlSeconds = 0;
+
+  saveSeat(code, 'guest', myName);
+  state.stopPresence = trackPresence(code, 'guest');
+  state.unsubscribeRoom = listenToRoom(code, onRoomUpdate);
+}
+
+function stopWatchingChallenge(){
+  if(state.unsubscribeChallengeWatch){ state.unsubscribeChallengeWatch(); state.unsubscribeChallengeWatch = null; }
+  if(state.challengeTickId){ clearInterval(state.challengeTickId); state.challengeTickId = null; }
+  if(state.challengeTimeoutId){ clearTimeout(state.challengeTimeoutId); state.challengeTimeoutId = null; }
+  el.challengePendingModal.classList.add('hidden');
+  state.challengeCode = null;
+  state.challengeRequestId = null;
+  state.challengeMyName = null;
+}
+
+function backToLobbyFromChallenge(){
+  el.setupModal.classList.remove('hidden');
+  if(state.mode === 'online' && state.onlineChoice === 'find') openLobby();
+}
+
+/* Host's side of the handshake — rendered inside the waiting-modal (see
+   onRoomUpdate's !guestP branch) whenever room.pendingChallenge is
+   present and not yet stale. Accept/Decline read the requestId off the
+   button's own dataset at click time, so this stays correct even if a
+   fresh challenge replaces an expired one between renders. */
+function renderIncomingChallenge(room){
+  const challenge = room.pendingChallenge;
+  const stillFresh = challenge && (Date.now() - challenge.requestedAt) < CHALLENGE_TIMEOUT_MS;
+  el.incomingChallenge.classList.toggle('hidden', !stillFresh);
+  el.waitingError.textContent = ''; // clear any earlier accept/decline error once the state actually moves on
+  if(stillFresh){
+    el.incomingChallengeText.textContent = `${challenge.name} wants to challenge you!`;
+    el.acceptChallengeBtn.dataset.requestId = challenge.requestId;
+    el.declineChallengeBtn.dataset.requestId = challenge.requestId;
+  }
+}
+
+function handleAcceptChallenge(){
+  const requestId = el.acceptChallengeBtn.dataset.requestId;
+  if(!requestId || !state.roomCode) return;
+  el.acceptChallengeBtn.disabled = true;
+  el.declineChallengeBtn.disabled = true;
+  el.waitingError.textContent = '';
+  acceptChallenge(state.roomCode, requestId)
+    // el.setupError lives inside the (hidden, at this point) setup-modal —
+    // it's invisible while the host is looking at the waiting-modal, so
+    // this needs its own visible error slot right here instead.
+    .catch(err => { el.waitingError.textContent = err.message || 'Could not accept \u2014 try again.'; })
+    .finally(() => {
+      el.acceptChallengeBtn.disabled = false;
+      el.declineChallengeBtn.disabled = false;
+    });
+}
+
+function handleDeclineChallenge(){
+  const requestId = el.declineChallengeBtn.dataset.requestId;
+  if(!requestId || !state.roomCode) return;
+  clearChallenge(state.roomCode, requestId).catch(() => { /* best-effort */ });
 }
 
 /* =========================================================
@@ -738,6 +937,7 @@ function onRoomUpdate(room){
     el.setupModal.classList.add('hidden');
     el.gameScreen.classList.add('hidden');
     el.waitingModal.classList.remove('hidden');
+    renderIncomingChallenge(room);
     return;
   }
 
