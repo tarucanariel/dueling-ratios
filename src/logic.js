@@ -45,6 +45,32 @@ export function randInt(min, max){
        and only then the two real blanks for the simplified result,
        exactly as before. */
 export function appendSimplifyStep(cells, rows, resultNum, resultDen, resultNumCellIndex, resultDenCellIndex){
+  // Division can land on a result that's negative-over-negative (e.g. a
+  // negative numerator divided by a negative-flipped numerator). That's
+  // mathematically fine but shouldn't go straight into GCF/simplify — we
+  // first ask for the equivalent positive fraction (two new tap points),
+  // then treat THAT as the basis for GCF/simplify below.
+  if(resultNum < 0 && resultDen < 0){
+    const posNum = -resultNum;
+    const posDen = -resultDen;
+
+    const posNumIdx = cells.length;
+    cells.push({ key: 'posNum', label: 'positive numerator', correct: posNum });
+    const posDenIdx = cells.length;
+    cells.push({ key: 'posDen', label: 'positive denominator', correct: posDen });
+
+    rows.push({
+      caption: 'Both negative \u2014 rewrite as a positive fraction',
+      numerator: [ { type: 'cell', cellIndex: posNumIdx } ],
+      denominator: [ { type: 'cell', cellIndex: posDenIdx } ],
+    });
+
+    resultNum = posNum;
+    resultDen = posDen;
+    resultNumCellIndex = posNumIdx;
+    resultDenCellIndex = posDenIdx;
+  }
+
   const [simpNum, simpDen] = reduce(resultNum, resultDen);
   const reducible = simpDen !== resultDen || Math.abs(simpNum) !== Math.abs(resultNum);
   if(!reducible) return;
