@@ -108,7 +108,7 @@ export async function createRoom(hostName, settings){
     status: 'waiting',
     settings,
     players: {
-      host: { name: hostName, score: 0, correctCount: 0, wrongCount: 0 },
+      host: { name: hostName, score: 0, correctCount: 0, wrongCount: 0, streak: 0 },
     },
     turn: 'host',
     pairIndex: 1,
@@ -176,7 +176,7 @@ export async function joinRoom(code, guestName){
     }
 
     room.players = room.players || {};
-    room.players.guest = { name: guestName, score: 0, correctCount: 0, wrongCount: 0 };
+    room.players.guest = { name: guestName, score: 0, correctCount: 0, wrongCount: 0, streak: 0 };
     room.status = 'active';
     room.lastActivityAt = Date.now();
 
@@ -287,7 +287,7 @@ export async function acceptChallenge(code, requestId){
     }
 
     room.players = room.players || {};
-    room.players.guest = { name: room.pendingChallenge.name, score: 0, correctCount: 0, wrongCount: 0 };
+    room.players.guest = { name: room.pendingChallenge.name, score: 0, correctCount: 0, wrongCount: 0, streak: 0 };
     room.status = 'active';
     room.pendingChallenge = null;
     room.lastActivityAt = Date.now();
@@ -504,9 +504,11 @@ export async function resetRoomForRematch(code, settings){
     'players/host/score': 0,
     'players/host/correctCount': 0,
     'players/host/wrongCount': 0,
+    'players/host/streak': 0,
     'players/guest/score': 0,
     'players/guest/correctCount': 0,
     'players/guest/wrongCount': 0,
+    'players/guest/streak': 0,
     turn: 'host',
     pairIndex: 1,
     problem,

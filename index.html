@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AAT's Dueling Ratios</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="icon" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 </head>
@@ -15,8 +20,11 @@
     <h1 class="game-title">AAT's Dueling Ratios</h1>
     <p class="subtitle">Solve the fraction, one slot at a time.</p>
     <div class="setup-links-row">
-      <button class="text-link-btn" id="instructions-btn" type="button">&#128214; Instructions</button>
-      <button class="text-link-btn" id="watch-games-btn" type="button">&#128065; Watch Games</button>
+      <button class="nav-chip" id="instructions-btn" type="button"><span class="nav-chip-label">Instructions</span></button>
+      <button class="nav-chip" id="watch-games-btn" type="button"><span class="nav-chip-label">Watch Games</span></button>
+      <button class="nav-chip" id="my-stats-btn" type="button"><span class="nav-chip-label">My Stats</span></button>
+      <button class="nav-chip" id="worksheet-btn" type="button"><span class="nav-chip-label">Worksheets</span></button>
+      <button class="nav-chip hidden" id="admin-feedback-btn" type="button"><span class="nav-chip-label">Feedback</span></button>
     </div>
 
     <div class="rejoin-banner hidden" id="rejoin-banner">
@@ -28,16 +36,47 @@
     </div>
 
     <div class="setup-step" id="step-name1">
-      <label for="player1-name">Your name</label>
+      <label for="player1-name" id="player1-name-label">Your name</label>
       <input type="text" id="player1-name" maxlength="16" placeholder="e.g. Light" autocomplete="off">
+
+      <div class="google-divider" id="google-divider"><span>or</span></div>
+
+      <button class="google-btn" id="player-google-signin-btn" type="button">
+        <span class="google-btn-icon-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.44c-.28 1.48-1.13 2.73-2.4 3.58v2.98h3.86c2.26-2.08 3.59-5.15 3.59-8.8z"/>
+            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-2.98c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/>
+            <path fill="#FBBC05" d="M5.27 14.3a7.2 7.2 0 0 1 0-4.6V6.61H1.29a12 12 0 0 0 0 10.78l3.98-3.09z"/>
+            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.94 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.61l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"/>
+          </svg>
+        </span>
+        Sign in with Google
+      </button>
+      <p class="field-note" id="google-signin-note">Unlocks stats that follow you across every device</p>
+
+      <div class="player-profile-chip hidden" id="player-profile-chip">
+        <img class="profile-pic" id="player-profile-pic" src="" alt="">
+        <span class="profile-name" id="player-profile-name"></span>
+        <button class="text-link-btn profile-not-you-btn" id="player-google-signout-btn" type="button">Not you?</button>
+      </div>
     </div>
 
     <div class="setup-step" id="step-mode">
       <label>How do you want to play?</label>
-      <div class="choice-row choice-row-3">
+      <div class="choice-row choice-row-4">
         <button class="choice-btn" id="mode-solo" data-mode="solo">Solo</button>
         <button class="choice-btn" id="mode-vs" data-mode="vs">Same Device</button>
+        <button class="choice-btn" id="mode-computer" data-mode="computer">vs Computer</button>
         <button class="choice-btn" id="mode-online" data-mode="online">Online</button>
+      </div>
+    </div>
+
+    <div class="setup-step hidden" id="step-difficulty">
+      <label>Computer difficulty</label>
+      <div class="choice-row choice-row-3">
+        <button class="choice-btn" id="difficulty-easy" data-difficulty="easy">Easy</button>
+        <button class="choice-btn selected" id="difficulty-medium" data-difficulty="medium">Medium</button>
+        <button class="choice-btn" id="difficulty-hard" data-difficulty="hard">Hard</button>
       </div>
     </div>
 
@@ -143,6 +182,7 @@
       <ul>
         <li><strong>Solo</strong> — practice on your own, at your own pace.</li>
         <li><strong>Same Device</strong> — two players take turns on one screen.</li>
+        <li><strong>vs Computer</strong> — take turns against a computer opponent on one screen. Choose Easy, Medium, or Hard — higher difficulties answer faster and make fewer mistakes.</li>
         <li><strong>Online</strong> — challenge someone on a different device using a shareable room code.</li>
       </ul>
 
@@ -160,6 +200,9 @@
       <h3>Scoring</h3>
       <p>Every correct answer is worth +1 point; every wrong guess costs -1 point. Whichever player has the higher score once all the fraction pairs are solved wins the game.</p>
 
+      <h3>Streaks</h3>
+      <p>Answer correctly several times in a row within a single game to build a streak. Every 5 in a row (5, 10, 15, 20, and onward) pops up a celebration banner with its own sound — the color and chime escalate through four tiers as your streak climbs, then loop back around for even longer runs. A single wrong answer resets the streak back to zero.</p>
+
       <h3>Setup Options</h3>
       <ul>
         <li><strong>Operations</strong> — choose which operations to practice, or select all of them.</li>
@@ -173,6 +216,40 @@
 
       <h3>Playing Online</h3>
       <p>One player creates a game and receives a short room code; the other player enters that code to join. Once both players are in, the game begins automatically for both of you at the same time.</p>
+
+      <h3>Signing In with Google (optional)</h3>
+      <p>Typing a name is always enough to play — signing in with Google is entirely optional, and only unlocks two extra things: your stats following your account across every device instead of just one browser, and the ability to join a class. Look for the "Sign in with Google" option next to the name field on the setup screen.</p>
+
+      <h3>My Stats</h3>
+      <p>Available once you're signed in with Google. Shows how many games you've played and your accuracy, broken out separately for Solo, Same Device, vs Computer, and Online, plus a combined "All Modes" total — and, in its own "My Badges" section, every achievement badge you've earned so far. Tap a badge (or hover it on a computer) to see its name and description.</p>
+
+      <h3>Achievement Badges</h3>
+      <p>Signed-in players can permanently unlock badges by hitting certain milestones. Earning one pops up its own gold celebration banner the moment it happens, in addition to showing up in My Stats afterward. Current badges:</p>
+      <ul>
+        <li><strong>🌱 Getting Started</strong> — Play 5 games.</li>
+        <li><strong>📚 Regular Player</strong> — Play 25 games.</li>
+        <li><strong>🏆 Dedicated</strong> — Play 100 games.</li>
+        <li><strong>🎯 Perfect Game</strong> — Finish a game with zero misses.</li>
+        <li><strong>💯 Sharpshooter</strong> — 90%+ accuracy over at least 50 total answers.</li>
+        <li><strong>🔥 On a Roll</strong> — Reach a 10-streak in a single game.</li>
+        <li><strong>⚡ Unstoppable</strong> — Reach a 20-streak in a single game.</li>
+        <li><strong>🌟 Flawless Fifty</strong> — Reach a 50-streak in a single game.</li>
+        <li><strong>⏱️ Beat the Clock</strong> — Finish a game (Local or Online) with a time control turned on.</li>
+        <li><strong>🧮 Math Machine</strong> — Answer 1,000 questions correctly, lifetime.</li>
+        <li><strong>🎓 Math Whiz</strong> — 98%+ accuracy over at least 200 total answers.</li>
+      </ul>
+
+      <h3>My Class</h3>
+      <p>Also inside My Stats, once signed in. A teacher (signed in with a school account) can create up to 5 classes, each with its own short join code to share — students who join with that code show up in a roster showing each student's games played and accuracy. A teacher can rename a class, remove an individual student from the roster, or delete a class entirely once it's no longer needed, freeing up a slot for a new one. A student can only be in one class at a time; joining a new one replaces the last. If a student's class is ever deleted, or the teacher removes them from it, that's picked up automatically the next time they open My Class.</p>
+
+      <h3>Watch Games</h3>
+      <p>Lets a teacher (signed in with a school account) browse and spectate ongoing Online games in real time, without taking part.</p>
+
+      <h3>Worksheets</h3>
+      <p>Generates a printable practice sheet — the same kinds of problems as the game, laid out with blank boxes to fill in by hand, plus an answer key on the last page. Choose the operations, negatives, and how many problems (1–10), then print or save as a PDF straight from your browser's print dialog. No sign-in needed.</p>
+
+      <h3>Send Feedback</h3>
+      <p>Once signed in with Google, look for the 💬 button in the bottom-right corner of the setup screen. Use it to send a comment, bug report, or suggestion straight to the developer — it only appears on the setup screen itself, not mid-game.</p>
     </div>
 
     <div class="credits">
@@ -185,26 +262,212 @@
       <div class="credits-text">
         <p class="credits-name"><strong>Game created by:</strong> Ariel A. Tarucan</p>
         <p class="credits-title">Teacher III, Esperanza Senior High School</p>
+        <p class="credits-title">District of Kinoguitan, Division of Misamis Oriental</p>
         <p class="credits-disclaimer">This game was created for educational and research purposes only.</p>
+        <p class="credits-copyright">&copy; 2026 Ariel A. Tarucan. All rights reserved.</p>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Teacher: PIN gate for the watch list -->
+<!-- Teacher: Google sign-in gate for the watch list -->
 <div class="modal-overlay hidden" id="teacher-pin-modal">
   <div class="modal chalk-panel">
     <h2 class="game-title" style="font-size:1.6rem;">Watch Games</h2>
-    <p class="subtitle">Enter the teacher PIN to view ongoing online games.</p>
-    <div class="setup-step">
-      <label for="teacher-pin-input">Teacher PIN</label>
-      <input type="password" inputmode="numeric" id="teacher-pin-input" maxlength="8" placeholder="PIN" autocomplete="off" class="code-input">
-    </div>
+    <p class="subtitle">Sign in with your DepEd Google account to view ongoing online games.</p>
     <p class="setup-error" id="teacher-pin-error"></p>
-    <button class="primary-btn" id="teacher-pin-submit-btn" type="button">Unlock</button>
+    <button class="primary-btn with-google-icon" id="teacher-pin-submit-btn" type="button">
+      <span class="google-btn-icon-wrap">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.44c-.28 1.48-1.13 2.73-2.4 3.58v2.98h3.86c2.26-2.08 3.59-5.15 3.59-8.8z"/>
+          <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-2.98c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/>
+          <path fill="#FBBC05" d="M5.27 14.3a7.2 7.2 0 0 1 0-4.6V6.61H1.29a12 12 0 0 0 0 10.78l3.98-3.09z"/>
+          <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.94 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.61l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"/>
+        </svg>
+      </span>
+      Sign in with Google
+    </button>
     <button class="secondary-btn" id="teacher-pin-cancel-btn" type="button">Cancel</button>
   </div>
 </div>
+
+<!-- Player: My Stats — sign-in prompt if signed out, stats summary if signed in -->
+<div class="modal-overlay hidden" id="my-stats-modal">
+  <div class="modal chalk-panel">
+    <h2 class="game-title" style="font-size:1.6rem;">My Stats</h2>
+    <p class="setup-error" id="my-stats-error"></p>
+
+    <div id="my-stats-signed-out">
+      <p class="subtitle">Sign in with Google to track your stats across every game you play — they'll follow your account, not just this device.</p>
+      <button class="primary-btn with-google-icon" id="my-stats-signin-btn" type="button">
+        <span class="google-btn-icon-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.44c-.28 1.48-1.13 2.73-2.4 3.58v2.98h3.86c2.26-2.08 3.59-5.15 3.59-8.8z"/>
+            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-2.98c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/>
+            <path fill="#FBBC05" d="M5.27 14.3a7.2 7.2 0 0 1 0-4.6V6.61H1.29a12 12 0 0 0 0 10.78l3.98-3.09z"/>
+            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.94 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.61l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"/>
+          </svg>
+        </span>
+        Sign in with Google
+      </button>
+    </div>
+
+    <div class="hidden" id="my-stats-signed-in">
+      <div class="player-profile-chip" id="my-stats-profile-chip">
+        <img class="profile-pic" id="my-stats-profile-pic" src="" alt="">
+        <span class="profile-name" id="my-stats-profile-name"></span>
+      </div>
+
+      <div class="my-stats-badges-section" id="my-stats-badges-section">
+        <h3 class="my-stats-badges-heading">My Badges</h3>
+        <div class="profile-badges my-stats-badges-grid" id="my-stats-badges-grid"></div>
+        <p class="field-note hidden" id="my-stats-badges-empty">No badges earned yet &mdash; keep playing!</p>
+      </div>
+
+      <table class="stats-table">
+        <thead>
+          <tr><th>Mode</th><th>Games</th><th>Accuracy</th></tr>
+        </thead>
+        <tbody>
+          <tr class="stats-total-row">
+            <td>All Modes</td>
+            <td id="my-stats-total-games">0</td>
+            <td id="my-stats-total-accuracy">N/A</td>
+          </tr>
+          <tr>
+            <td>Solo</td>
+            <td id="my-stats-solo-games">0</td>
+            <td id="my-stats-solo-accuracy">N/A</td>
+          </tr>
+          <tr>
+            <td>Same Device</td>
+            <td id="my-stats-samedevice-games">0</td>
+            <td id="my-stats-samedevice-accuracy">N/A</td>
+          </tr>
+          <tr>
+            <td>vs Computer</td>
+            <td id="my-stats-vscomputer-games">0</td>
+            <td id="my-stats-vscomputer-accuracy">N/A</td>
+          </tr>
+          <tr>
+            <td>Online</td>
+            <td id="my-stats-online-games">0</td>
+            <td id="my-stats-online-accuracy">N/A</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- My Class(es) — content depends on whether this Google account is
+           a teacher (@deped.gov.ph, same check as the Watch Games gate) or
+           a regular player. Only one of the "top-level" blocks below is
+           ever shown at once; the teacher's class-card list is built
+           dynamically in JS since it can be 0-5 classes. -->
+      <div class="my-class-section">
+        <h3 class="my-class-heading" id="my-class-heading">My Class</h3>
+
+        <div class="hidden" id="class-teacher-section">
+          <div id="class-create-row">
+            <div id="class-create-fields">
+              <div class="setup-step">
+                <label for="class-name-input">New class name</label>
+                <input type="text" id="class-name-input" maxlength="40" placeholder="e.g. Grade 7 - Section A" autocomplete="off">
+              </div>
+              <button class="secondary-btn" id="class-create-btn" type="button">Create Class</button>
+            </div>
+            <p class="field-note hidden" id="class-limit-note">You've reached the limit of 5 classes. Delete one to make room for a new one.</p>
+          </div>
+
+          <div id="class-list"></div>
+        </div>
+
+        <div class="hidden" id="class-student-join">
+          <p class="field-note hidden" id="class-removed-note">You were removed from your class.</p>
+          <div class="setup-step">
+            <label for="class-join-code-input">Have a class code from your teacher?</label>
+            <input type="text" id="class-join-code-input" maxlength="6" placeholder="e.g. AB3XQ2" autocomplete="off" class="class-code-input">
+          </div>
+          <button class="secondary-btn" id="class-join-btn" type="button">Join Class</button>
+        </div>
+
+        <div class="hidden" id="class-student-view">
+          <p class="field-note">You're in <strong id="class-student-class-name"></strong>, taught by <strong id="class-student-teacher-name"></strong>.</p>
+          <button class="text-link-btn" id="class-leave-btn" type="button">Leave Class</button>
+        </div>
+
+        <p class="setup-error" id="class-error"></p>
+      </div>
+    </div>
+
+    <button class="secondary-btn" id="my-stats-close-btn" type="button">Close</button>
+  </div>
+</div>
+
+<!-- Worksheet generator — same problem logic as gameplay, rendered blank for
+     paper practice. Runs entirely client-side; no sign-in, no database. -->
+<div class="modal-overlay hidden" id="worksheet-modal">
+  <div class="modal chalk-panel">
+    <h2 class="game-title" style="font-size:1.6rem;">Generate Worksheet</h2>
+    <p class="subtitle">Same problems as the game, printable for practice on paper.</p>
+
+    <div class="setup-step">
+      <label>Which operations should it include?</label>
+      <div class="checkbox-grid">
+        <label class="checkbox-item all-ops">
+          <input type="checkbox" id="ws-op-all" checked>
+          All Operations
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="ws-op-choice" data-op="+" checked>
+          Addition
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="ws-op-choice" data-op="-" checked>
+          Subtraction
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="ws-op-choice" data-op="&#215;" checked>
+          Multiplication
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="ws-op-choice" data-op="&#247;" checked>
+          Division
+        </label>
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <label class="checkbox-item">
+        <input type="checkbox" id="ws-allow-negatives">
+        Allow negatives (practice integer arithmetic)
+      </label>
+    </div>
+
+    <div class="setup-step">
+      <label for="ws-problem-count">How many problems?</label>
+      <select id="ws-problem-count">
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5" selected>5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+        <option value="9">9</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+
+    <p class="setup-error" id="ws-error"></p>
+    <button class="primary-btn" id="ws-generate-btn" type="button">Generate &amp; Print</button>
+    <button class="secondary-btn" id="ws-close-btn" type="button">Close</button>
+  </div>
+</div>
+
+<!-- Screen-hidden, print-only. Populated right before window.print() and
+     the ONLY thing visible when actually printing — see the @media print
+     rules in style.css. -->
+<div id="worksheet-print-root"></div>
 
 <!-- Teacher: list of ongoing online games -->
 <div class="modal-overlay hidden" id="watch-list-modal">
@@ -251,6 +514,9 @@
 
 <!-- Main game screen -->
 <div class="game-wrap hidden" id="game-screen">
+
+  <div class="streak-popup hidden" id="streak-popup" aria-live="polite"></div>
+  <div class="badge-popup hidden" id="badge-popup" aria-live="polite"></div>
 
   <div class="spectate-bar hidden" id="spectate-bar">
     <span>&#128065; Spectating room <strong id="spectate-room-code">----</strong></span>
@@ -317,6 +583,63 @@
     </div>
     <p class="review-summary" id="review-summary"></p>
     <div class="review-list" id="review-list"></div>
+  </div>
+</div>
+
+<!-- Badge tooltip — a tap-to-reveal alternative to the .badge-icon
+     buttons' native title="" attribute, since hover tooltips are
+     invisible on touch devices. Body-level and position:fixed (set via
+     JS in showBadgeTooltip) so it can appear correctly regardless of
+     which screen or which of the two profile chips triggered it. -->
+<div class="badge-tooltip hidden" id="badge-tooltip" role="tooltip"></div>
+
+<!-- Feedback FAB — only shown to signed-in Google accounts (see
+     updatePlayerIdentityUI in main.js). Fixed to the viewport, not
+     inside game-wrap, so it stays put across every screen. -->
+<button class="feedback-fab hidden" id="feedback-fab" type="button" aria-label="Send feedback or suggestions">
+  💬
+</button>
+
+<div class="modal-overlay hidden" id="feedback-modal">
+  <div class="modal chalk-panel feedback-panel">
+    <div class="instructions-header">
+      <h2 class="modal-heading">Send Feedback</h2>
+      <button class="close-btn" id="close-feedback-btn" aria-label="Close feedback" type="button">&times;</button>
+    </div>
+
+    <div id="feedback-form-view">
+      <p class="feedback-intro">Any suggestions? Have an idea to make the game better? Please let me know!</p>
+      <textarea id="feedback-message-input" class="feedback-textarea" maxlength="2000" rows="5" placeholder="What's working well? What could be better?"></textarea>
+      <p class="setup-error" id="feedback-error"></p>
+      <button class="secondary-btn" id="feedback-submit-btn" type="button">Send Feedback</button>
+    </div>
+
+    <div class="hidden" id="feedback-thanks-view">
+      <p class="feedback-thanks">🎉 Thanks! Your feedback has been sent.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Admin-only feedback viewer — chip visibility and the actual data
+     access are both gated to ADMIN_EMAIL (see teacherConfig.js and the
+     matching database.rules.json read rule). Everyone else never sees
+     the "Feedback" chip at all. -->
+<div class="modal-overlay hidden" id="admin-feedback-modal">
+  <div class="modal chalk-panel feedback-panel">
+    <div class="instructions-header">
+      <h2 class="modal-heading">Player Feedback</h2>
+      <button class="close-btn" id="close-admin-feedback-btn" aria-label="Close feedback viewer" type="button">&times;</button>
+    </div>
+
+    <p class="setup-error" id="admin-feedback-error"></p>
+    <p class="feedback-intro hidden" id="admin-feedback-empty">No feedback has been submitted yet.</p>
+    <div id="admin-feedback-list"></div>
+
+    <div class="admin-feedback-pagination hidden" id="admin-feedback-pagination">
+      <button class="text-link-btn" id="admin-feedback-prev-btn" type="button">&larr; Prev</button>
+      <span id="admin-feedback-page-label"></span>
+      <button class="text-link-btn" id="admin-feedback-next-btn" type="button">Next &rarr;</button>
+    </div>
   </div>
 </div>
 

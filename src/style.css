@@ -50,6 +50,23 @@ body{
   padding:16px;
 }
 
+/* Landing page only — every other modal (teacher gate, My Stats,
+   Worksheets, etc.) keeps the plain dark backdrop above. The gradient
+   is layered ON TOP of the photo (first background-image = topmost),
+   which is how the "dimmed" look is achieved — not a literal opacity
+   on the photo itself, so the darkness level is independent of the
+   photo's own brightness. center 25% keeps the framing biased toward
+   the upper portion of the photo (where the faces are) so a tall/narrow
+   viewport's cover-crop doesn't cut anyone off. */
+#setup-modal{
+  background:
+    linear-gradient(135deg, rgba(9,7,21,0.82), rgba(15,12,41,0.82)),
+    url('./assets/classroom-bg.jpg');
+  background-size:cover;
+  background-position:center 25%;
+  background-repeat:no-repeat;
+}
+
 .chalk-panel{
   background:var(--slate-light);
   border:1px solid var(--line);
@@ -135,6 +152,17 @@ body{
 }
 
 .choice-row-3 .choice-btn{
+  padding:12px 6px;
+  font-size:0.82rem;
+}
+
+.choice-row-4{
+  display:grid;
+  grid-template-columns:repeat(2, 1fr);
+  gap:10px;
+}
+
+.choice-row-4 .choice-btn{
   padding:12px 6px;
   font-size:0.82rem;
 }
@@ -300,14 +328,456 @@ body{
 .text-link-btn:hover{ color:var(--secondary); }
 
 .setup-links-row{
-  display:flex;
-  gap:18px;
-  margin:0 0 20px;
+  display:grid;
+  grid-template-columns:repeat(2, 1fr);
+  gap:8px;
+  margin:0 0 22px;
 }
-.setup-links-row .text-link-btn{
+
+.nav-chip{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:9px 12px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:rgba(138,43,226,0.1);
+  color:var(--chalk-dim);
+  font-family:'Inter', sans-serif;
+  font-weight:600;
+  font-size:0.78rem;
+  letter-spacing:0.01em;
+  cursor:pointer;
+  min-width:0;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s, color 0.15s;
+}
+
+.nav-chip-label{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.nav-chip-icon{
+  font-size:0.92rem;
+  line-height:1;
+}
+
+.nav-chip:hover{
+  border-color:var(--amber);
+  background:rgba(0,210,255,0.12);
+  color:var(--chalk);
+  transform:translateY(-1px);
+}
+
+.nav-chip:active{ transform:translateY(0); }
+
+/* ---------- Player identity: typed name vs Google profile ---------- */
+
+/* A quiet divider between "type your name" and the Google option — the
+   same visual grammar (a hairline in --line) used by chalk-panel borders
+   and the room-code display elsewhere, so it doesn't feel bolted on. */
+.google-divider{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:14px 0 12px;
+  color:var(--chalk-dim);
+  font-size:0.72rem;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:0.1em;
+}
+
+.google-divider::before, .google-divider::after{
+  content:'';
+  flex:1;
+  height:1px;
+  background:var(--line);
+}
+
+/* The "Sign in with Google" pill on the setup screen: dark violet/cyan
+   glass, same hover-lift-and-glow language as .nav-chip and .choice-btn,
+   so it reads as part of this app's theme rather than a generic
+   plastered-on OAuth button. Real Google "G" mark kept in the icon chip
+   for recognizability/trust, since that matters for an auth control. */
+.google-btn{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  width:100%;
+  padding:11px 16px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:linear-gradient(135deg, rgba(138,43,226,0.14), rgba(0,210,255,0.08));
+  color:var(--chalk);
+  font-family:'Inter', sans-serif;
+  font-weight:600;
+  font-size:0.85rem;
+  letter-spacing:0.01em;
+  cursor:pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.google-btn:hover{
+  border-color:var(--amber);
+  background:linear-gradient(135deg, rgba(138,43,226,0.24), rgba(0,210,255,0.18));
+  transform:translateY(-2px);
+  box-shadow:0 8px 22px rgba(0,210,255,0.18);
+}
+
+.google-btn:active{ transform:translateY(0); }
+
+.google-btn-icon-wrap{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  background:#ffffff;
+  flex-shrink:0;
+}
+
+.google-btn-icon-wrap svg{ width:14px; height:14px; display:block; }
+
+/* Reuses the standard gradient primary-btn everywhere it's already the
+   modal's main call to action (Watch Games gate, My Stats) — just makes
+   room for the same "G" icon chip so all three sign-in entry points in
+   the app look like one consistent control. */
+.primary-btn.with-google-icon{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+}
+
+.player-profile-chip{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 12px;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:var(--slate);
+}
+
+.player-profile-chip .profile-pic{
+  width:32px;
+  height:32px;
+  border-radius:50%;
+  object-fit:cover;
+  flex-shrink:0;
+  background:var(--line);
+}
+
+.player-profile-chip .profile-name{
+  flex:1;
+  font-family:'Inter', sans-serif;
+  font-weight:600;
+  color:var(--chalk);
+  font-size:0.95rem;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.player-profile-chip .profile-not-you-btn{
   display:inline;
   margin:0;
+  font-size:0.78rem;
+  flex-shrink:0;
 }
+
+/* ---------- My Stats panel ---------- */
+#my-stats-profile-chip{
+  margin-bottom:18px;
+}
+
+.stats-table{
+  width:100%;
+  border-collapse:collapse;
+  margin-bottom:8px;
+  font-family:'Inter', sans-serif;
+}
+
+.stats-table th{
+  text-align:left;
+  font-size:0.72rem;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
+  color:var(--chalk-dim);
+  font-weight:600;
+  padding:0 10px 8px;
+}
+
+.stats-table th:not(:first-child),
+.stats-table td:not(:first-child){
+  text-align:right;
+}
+
+.stats-table td{
+  padding:11px 10px;
+  border-top:1px solid var(--line);
+  font-size:0.9rem;
+  color:var(--chalk);
+}
+
+.stats-table td:first-child{
+  color:var(--chalk-dim);
+  font-weight:600;
+}
+
+.stats-table tbody td{
+  font-family:'JetBrains Mono', monospace;
+}
+
+.stats-table tbody tr:first-child td:first-child{
+  font-family:'Inter', sans-serif;
+}
+
+.stats-total-row td{
+  background:rgba(0,210,255,0.07);
+  color:var(--amber);
+  font-weight:700;
+}
+
+.stats-total-row td:first-child{
+  color:var(--amber);
+}
+
+/* ---------- My Class (inside My Stats) ---------- */
+.my-class-section{
+  margin-top:22px;
+  padding-top:18px;
+  border-top:1px solid var(--line);
+}
+
+.my-class-heading{
+  font-size:0.95rem;
+  color:var(--chalk);
+  margin:0 0 12px;
+}
+
+.class-code-display{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 16px;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:rgba(0,210,255,0.07);
+  margin-bottom:16px;
+}
+
+.class-code-label{
+  font-size:0.72rem;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
+  color:var(--chalk-dim);
+}
+
+.class-code-value{
+  font-family:'JetBrains Mono', monospace;
+  font-weight:700;
+  font-size:1.3rem;
+  letter-spacing:0.08em;
+  color:var(--amber);
+}
+
+.class-code-input{ text-transform:uppercase; letter-spacing:0.1em; }
+
+#class-student-view .field-note{ margin-bottom:10px; }
+
+#class-create-row{ margin-bottom:18px; }
+
+.class-nav{
+  display:flex;
+  flex-wrap:nowrap;
+  overflow-x:auto;
+  gap:2px;
+  margin-bottom:0;
+  border-bottom:1px solid var(--line);
+  scrollbar-width:thin; /* Firefox */
+  scrollbar-color:var(--secondary) transparent; /* Firefox: thumb, track */
+}
+
+.class-nav::-webkit-scrollbar{
+  height:6px;
+}
+
+.class-nav::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+.class-nav::-webkit-scrollbar-thumb{
+  background:var(--btn-gradient);
+  border-radius:999px;
+}
+
+.class-nav::-webkit-scrollbar-thumb:hover{
+  background:var(--btn-gradient-hover);
+}
+
+.class-nav-tab{
+  font-family:'Inter', sans-serif;
+  font-size:0.85rem;
+  font-weight:600;
+  color:var(--chalk-dim);
+  background:none;
+  border:none;
+  border-bottom:3px solid transparent;
+  border-radius:0;
+  padding:10px 16px;
+  white-space:nowrap;
+  flex-shrink:0;
+  cursor:pointer;
+  transition:color 0.15s ease, border-color 0.15s ease;
+}
+
+.class-nav-tab:hover{
+  color:var(--chalk);
+}
+
+.class-nav-tab.active{
+  color:var(--amber);
+  border-bottom-color:var(--amber);
+}
+
+.class-card{
+  border:1px solid var(--line);
+  border-top:none;
+  border-radius:0 0 10px 10px;
+  padding:14px 16px;
+  margin-bottom:14px;
+  background:var(--slate);
+}
+
+.class-card-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:10px;
+  flex-wrap:wrap;
+}
+
+.class-card-name{
+  font-family:'Inter', sans-serif;
+  font-weight:700;
+  color:var(--chalk);
+  font-size:0.95rem;
+}
+
+.class-card-name-wrap{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.class-rename-btn{
+  border:none;
+  background:none;
+  padding:0;
+  color:var(--chalk-dim);
+  font-family:'Inter', sans-serif;
+  font-size:0.72rem;
+  font-weight:600;
+  text-decoration:underline;
+  text-underline-offset:2px;
+  cursor:pointer;
+}
+
+.class-rename-btn:hover{ color:var(--amber); }
+
+.class-delete-btn:hover{ color:var(--bad); }
+
+.class-delete-warning{
+  flex-basis:100%;
+  margin:0 0 2px;
+  color:var(--chalk-dim);
+  font-size:0.85rem;
+}
+
+.class-delete-confirm{
+  background:var(--bad);
+  color:#ffffff;
+}
+
+.class-delete-confirm:hover{ background:#e0264f; }
+
+.class-roster-remove-cell{
+  text-align:right;
+  white-space:nowrap;
+}
+
+.class-roster-remove-btn,
+.class-roster-remove-cell .class-rename-cancel{
+  display:inline;
+  margin:0 0 0 10px;
+  font-size:0.78rem;
+}
+
+.class-roster-remove-btn:first-child{ margin-left:0; }
+
+.class-rename-row{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:12px;
+}
+
+.class-rename-row.hidden{ display:none; }
+
+.class-rename-input{
+  flex:1 1 200px;
+  min-width:0;
+  padding:9px 12px;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:var(--slate);
+  color:var(--chalk);
+  font-family:'JetBrains Mono', monospace;
+  font-size:0.9rem;
+}
+
+.class-rename-input:focus{
+  outline:none;
+  border-color:var(--amber);
+}
+
+.class-rename-row .class-rename-save,
+.class-rename-row .class-delete-confirm{
+  width:auto;
+  margin:0;
+  padding:9px 18px;
+}
+.class-rename-row .class-rename-cancel{ margin:0; }
+.class-rename-row .class-rename-error{
+  flex-basis:100%;
+  margin:0;
+}
+
+.class-card-code{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:0.72rem;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
+  color:var(--chalk-dim);
+}
+
+.class-card-code .class-code-value{
+  font-size:1rem;
+  text-transform:none;
+  letter-spacing:0.08em;
+}
+
+.class-card .stats-table{ margin-bottom:0; }
+.class-card .field-note{ margin:8px 0 0; }
 
 /* ---------- Watch list (teacher spectator view) ---------- */
 .watch-list-body{
@@ -494,6 +964,146 @@ body{
   max-width:560px;
 }
 
+.feedback-fab{
+  position:fixed;
+  right:20px;
+  bottom:20px;
+  z-index:60;
+  width:52px;
+  height:52px;
+  border-radius:50%;
+  border:none;
+  background:var(--btn-gradient);
+  color:#fff;
+  font-size:1.4rem;
+  line-height:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  box-shadow:0 8px 22px rgba(106,17,203,0.5);
+  transition:transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.feedback-fab:hover{
+  transform:scale(1.08);
+  box-shadow:0 10px 28px rgba(106,17,203,0.6);
+}
+
+.feedback-fab.hidden{ display:none; }
+
+.feedback-panel{
+  max-width:420px;
+}
+
+.feedback-intro{
+  color:var(--chalk-dim);
+  font-size:0.88rem;
+  line-height:1.5;
+  margin:0 0 14px;
+}
+
+.feedback-textarea{
+  width:100%;
+  min-height:110px;
+  padding:12px;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:var(--slate);
+  color:var(--chalk);
+  font-family:'Inter', sans-serif;
+  font-size:0.9rem;
+  line-height:1.5;
+  resize:vertical;
+}
+
+.feedback-textarea:focus{
+  outline:none;
+  border-color:var(--amber);
+}
+
+.feedback-thanks{
+  color:var(--chalk);
+  font-size:1rem;
+  text-align:center;
+  padding:20px 0;
+  margin:0;
+}
+
+.admin-feedback-entry{
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:12px 14px;
+  margin-bottom:10px;
+  background:var(--slate);
+}
+
+.admin-feedback-meta{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:6px;
+}
+
+.admin-feedback-name{
+  font-family:'Inter', sans-serif;
+  font-weight:700;
+  font-size:0.85rem;
+  color:var(--chalk);
+}
+
+.admin-feedback-date{
+  font-size:0.72rem;
+  color:var(--chalk-dim);
+  white-space:nowrap;
+}
+
+.admin-feedback-message{
+  color:var(--chalk-dim);
+  font-size:0.88rem;
+  line-height:1.5;
+  margin:0;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+
+.admin-feedback-actions{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:10px;
+}
+
+.admin-feedback-actions .class-rename-btn{
+  margin:0;
+}
+
+.admin-feedback-pagination{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-top:6px;
+}
+
+.admin-feedback-pagination.hidden{ display:none; }
+
+.admin-feedback-pagination .text-link-btn{
+  margin:0;
+}
+
+.admin-feedback-pagination .text-link-btn:disabled{
+  color:var(--chalk-dim);
+  opacity:0.4;
+  cursor:default;
+  text-decoration:none;
+}
+
+#admin-feedback-page-label{
+  color:var(--chalk-dim);
+  font-size:0.8rem;
+}
+
 .instructions-header{
   display:flex;
   align-items:center;
@@ -655,10 +1265,207 @@ body{
   margin-top:4px !important;
 }
 
+.credits-copyright{
+  font-size:0.72rem;
+  color:var(--chalk-dim);
+  margin-top:8px !important;
+}
+
 /* ---------- Game screen ---------- */
 .game-wrap{
   width:100%;
   max-width:760px;
+  position:relative;
+}
+
+.streak-popup{
+  position:absolute;
+  top:6px;
+  left:50%;
+  z-index:50;
+  pointer-events:none;
+  padding:10px 22px;
+  border-radius:999px;
+  color:#fff;
+  font-family:'Inter', sans-serif;
+  font-weight:800;
+  font-size:1.05rem;
+  letter-spacing:0.01em;
+  white-space:nowrap;
+  opacity:0;
+}
+
+.streak-popup.hidden{ display:none; }
+
+/* Tier 1 — 5, 25, 45… : bronze */
+.streak-popup.streak-tier-1{
+  background:linear-gradient(135deg, rgba(255,140,0,0.95), rgba(255,60,60,0.95));
+  box-shadow:0 8px 24px rgba(255,90,0,0.45);
+}
+
+/* Tier 2 — 10, 30, 50… : silver/cyan */
+.streak-popup.streak-tier-2{
+  background:linear-gradient(135deg, rgba(0,210,255,0.95), rgba(90,110,255,0.95));
+  box-shadow:0 8px 24px rgba(0,180,255,0.45);
+}
+
+/* Tier 3 — 15, 35, 55… : gold */
+.streak-popup.streak-tier-3{
+  background:linear-gradient(135deg, rgba(255,215,0,0.95), rgba(255,140,0,0.95));
+  box-shadow:0 8px 24px rgba(255,190,0,0.5);
+}
+
+/* Tier 4 — 20, 40, 60… : prism */
+.streak-popup.streak-tier-4{
+  background:linear-gradient(135deg, rgba(186,85,255,0.95), rgba(255,60,180,0.95));
+  box-shadow:0 8px 24px rgba(200,80,255,0.5);
+}
+
+.streak-popup.streak-pop-in{
+  animation:streakPop 1.5s ease forwards;
+}
+
+@keyframes streakPop{
+  0%{ opacity:0; transform:translate(-50%,-14px) scale(0.8); }
+  12%{ opacity:1; transform:translate(-50%,0) scale(1.1); }
+  22%{ transform:translate(-50%,0) scale(1); }
+  78%{ opacity:1; transform:translate(-50%,0) scale(1); }
+  100%{ opacity:0; transform:translate(-50%,-8px) scale(0.92); }
+}
+
+@media (prefers-reduced-motion: reduce){
+  .streak-popup.streak-pop-in{
+    animation:streakPopReduced 1.5s ease forwards;
+  }
+}
+
+@keyframes streakPopReduced{
+  0%{ opacity:0; transform:translateX(-50%); }
+  12%{ opacity:1; transform:translateX(-50%); }
+  78%{ opacity:1; transform:translateX(-50%); }
+  100%{ opacity:0; transform:translateX(-50%); }
+}
+
+/* ---------- Achievement badges ---------- */
+
+.profile-badges{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+}
+
+.my-stats-badges-section{
+  margin:12px 0 16px;
+  padding:12px 14px;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:var(--slate);
+}
+
+.my-stats-badges-heading{
+  margin:0 0 10px;
+  font-family:'Inter', sans-serif;
+  font-size:0.85rem;
+  font-weight:700;
+  color:var(--chalk);
+  text-transform:uppercase;
+  letter-spacing:0.04em;
+}
+
+.my-stats-badges-grid{
+  gap:8px;
+}
+
+.my-stats-badges-grid .badge-icon{
+  width:34px;
+  height:34px;
+  font-size:1.2rem;
+}
+
+/* No CSS needed to coordinate the grid and its empty-state message —
+   the existing .profile-badges:empty{ display:none } rule already
+   collapses .my-stats-badges-grid when there are no badges, and
+   renderMyStatsBadges() in main.js separately toggles
+   #my-stats-badges-empty's hidden class in the same call, so the two
+   always agree. */
+
+.profile-badges:empty{ display:none; }
+
+.badge-icon{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:26px;
+  height:26px;
+  border-radius:50%;
+  background:rgba(255,215,0,0.12);
+  border:1px solid rgba(255,215,0,0.35);
+  font-size:0.95rem;
+  line-height:1;
+  cursor:pointer;
+  padding:0;
+  font-family:inherit;
+  transition:background 0.15s ease, transform 0.1s ease;
+}
+
+.badge-icon:hover{
+  background:rgba(255,215,0,0.22);
+}
+
+.badge-icon:active{
+  transform:scale(0.92);
+}
+
+.badge-tooltip{
+  position:fixed;
+  z-index:80;
+  max-width:220px;
+  padding:8px 12px;
+  border-radius:10px;
+  background:var(--slate);
+  border:1px solid var(--line);
+  color:var(--chalk);
+  font-family:'Inter', sans-serif;
+  font-size:0.78rem;
+  line-height:1.45;
+  box-shadow:0 8px 22px rgba(0,0,0,0.45);
+  pointer-events:none;
+  opacity:0;
+  transition:opacity 0.15s ease;
+}
+
+.badge-tooltip.visible{ opacity:1; }
+.badge-tooltip.hidden{ display:none; }
+
+.badge-popup{
+  position:absolute;
+  top:48px; /* sits below the streak popup's usual spot so the two never overlap if they land close together */
+  left:50%;
+  z-index:50;
+  pointer-events:none;
+  padding:10px 22px;
+  border-radius:999px;
+  color:#3a2a00;
+  font-family:'Inter', sans-serif;
+  font-weight:800;
+  font-size:1.05rem;
+  letter-spacing:0.01em;
+  white-space:nowrap;
+  opacity:0;
+  background:linear-gradient(135deg, #ffe066, #ffb700);
+  box-shadow:0 8px 24px rgba(255,183,0,0.5);
+}
+
+.badge-popup.hidden{ display:none; }
+
+.badge-popup.badge-pop-in{
+  animation:streakPop 1.5s ease forwards;
+}
+
+@media (prefers-reduced-motion: reduce){
+  .badge-popup.badge-pop-in{
+    animation:streakPopReduced 1.5s ease forwards;
+  }
 }
 
 .score-bar{
@@ -1091,6 +1898,8 @@ body{
   .checkbox-item{ font-size:0.84rem; }
   .choice-btn{ padding:11px 8px; font-size:0.84rem; }
   .primary-btn{ padding:12px; font-size:0.95rem; }
+  .nav-chip{ padding:8px 8px; font-size:0.72rem; }
+  .setup-links-row{ gap:6px; }
 
   .board-area{ padding:16px 12px; gap:12px; }
   .fraction-block{ font-size:1.1rem; }
@@ -1099,6 +1908,8 @@ body{
   .cross-row{ gap:5px; }
   .row-numerator, .row-denominator{ gap:4px; }
   .inline-op{ font-size:0.85rem; padding:0; }
+
+  .feedback-fab{ width:42px; height:42px; font-size:1.15rem; right:14px; bottom:14px; }
 }
 
 /* Below ~430px, the board needs every bit of width it can get, so the
@@ -1145,4 +1956,115 @@ button:focus-visible, input:focus-visible{
 @media (prefers-reduced-motion: reduce){
   .cell-slot.active{ animation:none; }
   .cell-slot.drop-correct, .cell-slot.drop-wrong{ animation:none; }
+}
+
+/* ---------- Worksheet: printable practice sheet ----------
+   Hidden on-screen; only shown (and only THING shown) during an actual
+   print, via the visibility trick below. Reuses the exact same class
+   names as live gameplay (.given-row, .fraction-block, .cross-row-wrap,
+   .cell-slot, etc.) so the problem structure is guaranteed identical —
+   only the colors/backgrounds differ here, overridden for paper instead
+   of screen. Cell boxes are always blank (no .active/.filled state —
+   the worksheet has no notion of "already answered"). */
+#worksheet-print-root{ display:none; }
+
+@media print{
+  body *{ visibility:hidden; }
+  #worksheet-print-root, #worksheet-print-root *{ visibility:visible; }
+  #worksheet-print-root{
+    display:block;
+    position:absolute;
+    top:0;
+    left:0;
+    width:100%;
+    background:#ffffff;
+    color:#111111;
+    font-family:'Inter', sans-serif;
+    padding:24px;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+
+  /* Force portrait regardless of the browser/printer's remembered
+     setting, and use real page margins instead of the padding above
+     doing all the work. */
+  @page{
+    size:portrait;
+    margin:1.2cm;
+  }
+
+  .ws-header{ text-align:center; margin-bottom:24px; }
+  .ws-header h1{ font-size:1.25rem; margin:0 0 14px; color:#111111; }
+  .ws-header-fields{
+    display:flex;
+    justify-content:space-between;
+    font-size:0.95rem;
+    color:#111111;
+    padding:0 4px;
+  }
+
+  /* Two columns so a portrait page isn't mostly empty space around one
+     narrow, centered column of problems. */
+  .ws-problems{
+    column-count:2;
+    column-gap:28px;
+  }
+
+  .ws-problem{
+    break-inside:avoid;
+    page-break-inside:avoid;
+    margin-bottom:20px;
+    padding-bottom:14px;
+    border-bottom:1px dashed #999999;
+  }
+
+  .ws-problem-number{
+    font-weight:700;
+    font-size:1rem;
+    margin-bottom:8px;
+    color:#111111;
+  }
+
+  #worksheet-print-root .given-row{
+    border-bottom-color:#999999;
+    justify-content:flex-start;
+  }
+  #worksheet-print-root .cross-row-wrap{ align-items:flex-start; }
+  #worksheet-print-root .cross-row{ justify-content:flex-start; }
+  #worksheet-print-root .row-caption{ color:#555555; }
+  #worksheet-print-root .row-equals{ color:#111111; font-size:1.2rem; }
+  #worksheet-print-root .operator-symbol{ color:#111111; font-size:1.4rem; }
+  #worksheet-print-root .inline-op{ color:#111111; }
+  #worksheet-print-root .fraction-block{ font-size:1.3rem; }
+
+  /* IMPORTANT: these were background-color in the first pass, and most
+     browsers strip background-color/background-image when printing
+     unless "print backgrounds" is manually checked in the print dialog
+     — which is exactly why the fraction bar and division line were
+     invisible. border-top always prints regardless of that setting, so
+     it's used here instead of background, not just color-adjusted. */
+  #worksheet-print-root .row-line{
+    background:none;
+    height:0;
+    border-top:2px solid #111111;
+  }
+  #worksheet-print-root .fraction-block .vinculum{
+    background:none;
+    height:0;
+    border-top:2px solid #111111;
+  }
+  #worksheet-print-root .fraction-block .num,
+  #worksheet-print-root .fraction-block .den{ color:#111111; }
+
+  #worksheet-print-root .cell-slot{
+    width:40px;
+    height:40px;
+    border:1.5px solid #111111;
+    background:#ffffff;
+    color:#ffffff; /* blank — nothing to show, this just avoids a stray "?" */
+  }
+
+  .ws-answer-key{ page-break-before:always; break-before:page; }
+  .ws-answer-key h2{ color:#111111; font-size:1.1rem; }
+  .ws-answer-item{ color:#222222; font-size:0.82rem; margin-bottom:5px; }
 }

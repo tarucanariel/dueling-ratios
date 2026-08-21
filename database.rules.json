@@ -1,0 +1,41 @@
+{
+  "rules": {
+    "rooms": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "playerStats": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || data.child('classTeacherUid').val() === auth.uid)",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "classes": {
+      "$teacherUid": {
+        ".read": "auth != null && auth.uid === $teacherUid",
+        ".write": "auth != null && auth.uid === $teacherUid",
+        "$classId": {
+          "students": {
+            "$studentUid": {
+              ".read": "auth != null && auth.uid === $studentUid",
+              ".write": "auth != null && auth.uid === $studentUid"
+            }
+          }
+        }
+      }
+    },
+    "classJoinCodes": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && (newData.child('teacherUid').val() === auth.uid || data.child('teacherUid').val() === auth.uid)"
+      }
+    },
+    "feedback": {
+      ".read": "auth != null && auth.token.email.toLowerCase() === 'ariel.tarucan@deped.gov.ph'",
+      "$feedbackId": {
+        ".write": "auth != null && ((auth.token.firebase.sign_in_provider !== 'anonymous' && !data.exists() && newData.child('uid').val() === auth.uid) || (auth.token.email.toLowerCase() === 'ariel.tarucan@deped.gov.ph' && !newData.exists()))",
+        ".validate": "newData.hasChildren(['uid','name','message','createdAt']) && newData.child('message').isString() && newData.child('message').val().length > 0 && newData.child('message').val().length <= 2000"
+      }
+    }
+  }
+}

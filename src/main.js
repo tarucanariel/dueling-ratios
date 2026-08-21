@@ -1,9 +1,11 @@
 import './style.css';
 import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
-import { TEACHER_PIN } from './teacherConfig.js';
+import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
-import { db } from './firebase.js';
+import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge } from './firebase.js';
+import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge } from './badges.js';
+import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound } from './sounds.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 
@@ -37,6 +39,13 @@ const state = {
   stopPresence: null, // cleanup function from trackPresence(), for the real player's own connection
   missLog: [], // wrong-attempt records for the current game, for the post-game review
   rematchFinalizing: false, // guards against the host double-triggering resetRoomForRematch
+  difficulty: 'medium', // 'easy' | 'medium' | 'hard' — only meaningful when mode === 'computer'
+
+  // Player identity — if set, this player signed in with Google rather
+  // than typing a name. Persists across resetToSetup() (new rounds keep
+  // the same signed-in identity) until they explicitly click "Not you?".
+  googleUser: null, // null | { name, photoURL, email }
+  myBadges: new Set(), // badge ids earned by the signed-in account — see badges.js and loadMyBadges()
 
   // "Find Opponent" lobby (browsing waiting rooms instead of typing a code)
   unsubscribeLobby: null,
@@ -67,11 +76,22 @@ const state = {
 const el = {
   setupModal: document.getElementById('setup-modal'),
   player1Name: document.getElementById('player1-name'),
+  player1NameLabel: document.getElementById('player1-name-label'),
+  googleDivider: document.getElementById('google-divider'),
+  playerGoogleSigninBtn: document.getElementById('player-google-signin-btn'),
+  googleSigninNote: document.getElementById('google-signin-note'),
+  playerProfileChip: document.getElementById('player-profile-chip'),
+  playerProfilePic: document.getElementById('player-profile-pic'),
+  playerProfileName: document.getElementById('player-profile-name'),
+  playerGoogleSignoutBtn: document.getElementById('player-google-signout-btn'),
   player2Name: document.getElementById('player2-name'),
   stepName2: document.getElementById('step-name2'),
   modeSolo: document.getElementById('mode-solo'),
   modeVs: document.getElementById('mode-vs'),
+  modeComputer: document.getElementById('mode-computer'),
   modeOnline: document.getElementById('mode-online'),
+  stepDifficulty: document.getElementById('step-difficulty'),
+  difficultyChoices: document.querySelectorAll('.choice-btn[data-difficulty]'),
   startBtn: document.getElementById('start-game-btn'),
   setupError: document.getElementById('setup-error'),
 
@@ -100,7 +120,24 @@ const el = {
   instructionsBtn: document.getElementById('instructions-btn'),
   closeInstructionsBtn: document.getElementById('close-instructions-btn'),
   creditsPhoto: document.getElementById('credits-photo'),
-  roomCodeDisplay: document.getElementById('room-code-display'),
+  feedbackFab: document.getElementById('feedback-fab'),
+  feedbackModal: document.getElementById('feedback-modal'),
+  closeFeedbackBtn: document.getElementById('close-feedback-btn'),
+  feedbackFormView: document.getElementById('feedback-form-view'),
+  feedbackThanksView: document.getElementById('feedback-thanks-view'),
+  feedbackMessageInput: document.getElementById('feedback-message-input'),
+  feedbackError: document.getElementById('feedback-error'),
+  feedbackSubmitBtn: document.getElementById('feedback-submit-btn'),
+  adminFeedbackBtn: document.getElementById('admin-feedback-btn'),
+  adminFeedbackModal: document.getElementById('admin-feedback-modal'),
+  closeAdminFeedbackBtn: document.getElementById('close-admin-feedback-btn'),
+  adminFeedbackError: document.getElementById('admin-feedback-error'),
+  adminFeedbackEmpty: document.getElementById('admin-feedback-empty'),
+  adminFeedbackList: document.getElementById('admin-feedback-list'),
+  adminFeedbackPagination: document.getElementById('admin-feedback-pagination'),
+  adminFeedbackPrevBtn: document.getElementById('admin-feedback-prev-btn'),
+  adminFeedbackNextBtn: document.getElementById('admin-feedback-next-btn'),
+  adminFeedbackPageLabel: document.getElementById('admin-feedback-page-label'),  roomCodeDisplay: document.getElementById('room-code-display'),
   cancelWaitingBtn: document.getElementById('cancel-waiting-btn'),
 
   incomingChallenge: document.getElementById('incoming-challenge'),
@@ -129,6 +166,9 @@ const el = {
   problemStrip: document.getElementById('problem-strip'),
   poolTray: document.getElementById('pool-tray'),
   feedbackLine: document.getElementById('feedback-line'),
+  streakPopup: document.getElementById('streak-popup'),
+  badgePopup: document.getElementById('badge-popup'),
+  badgeTooltip: document.getElementById('badge-tooltip'),
 
   winnerModal: document.getElementById('winner-modal'),
   winnerHeading: document.getElementById('winner-heading'),
@@ -145,8 +185,54 @@ const el = {
   // Teacher spectator view
   watchGamesBtn: document.getElementById('watch-games-btn'),
   teacherPinModal: document.getElementById('teacher-pin-modal'),
-  teacherPinInput: document.getElementById('teacher-pin-input'),
   teacherPinError: document.getElementById('teacher-pin-error'),
+  myStatsBtn: document.getElementById('my-stats-btn'),
+  myStatsModal: document.getElementById('my-stats-modal'),
+  myStatsSignedOut: document.getElementById('my-stats-signed-out'),
+  myStatsSignedIn: document.getElementById('my-stats-signed-in'),
+  myStatsError: document.getElementById('my-stats-error'),
+  myStatsSigninBtn: document.getElementById('my-stats-signin-btn'),
+  myStatsCloseBtn: document.getElementById('my-stats-close-btn'),
+  myStatsProfilePic: document.getElementById('my-stats-profile-pic'),
+  myStatsProfileName: document.getElementById('my-stats-profile-name'),
+  myStatsBadgesGrid: document.getElementById('my-stats-badges-grid'),
+  myStatsBadgesEmpty: document.getElementById('my-stats-badges-empty'),
+  myStatsTotalGames: document.getElementById('my-stats-total-games'),
+  myStatsTotalAccuracy: document.getElementById('my-stats-total-accuracy'),
+  myStatsSoloGames: document.getElementById('my-stats-solo-games'),
+  myStatsSoloAccuracy: document.getElementById('my-stats-solo-accuracy'),
+  myStatsSameDeviceGames: document.getElementById('my-stats-samedevice-games'),
+  myStatsSameDeviceAccuracy: document.getElementById('my-stats-samedevice-accuracy'),
+  myStatsVsComputerGames: document.getElementById('my-stats-vscomputer-games'),
+  myStatsVsComputerAccuracy: document.getElementById('my-stats-vscomputer-accuracy'),
+  myStatsOnlineGames: document.getElementById('my-stats-online-games'),
+  myStatsOnlineAccuracy: document.getElementById('my-stats-online-accuracy'),
+  myClassHeading: document.getElementById('my-class-heading'),
+  classTeacherSection: document.getElementById('class-teacher-section'),
+  classNameInput: document.getElementById('class-name-input'),
+  classCreateFields: document.getElementById('class-create-fields'),
+  classCreateBtn: document.getElementById('class-create-btn'),
+  classLimitNote: document.getElementById('class-limit-note'),
+  classList: document.getElementById('class-list'),
+  classStudentJoin: document.getElementById('class-student-join'),
+  classRemovedNote: document.getElementById('class-removed-note'),
+  classJoinCodeInput: document.getElementById('class-join-code-input'),
+  classJoinBtn: document.getElementById('class-join-btn'),
+  classStudentView: document.getElementById('class-student-view'),
+  classStudentClassName: document.getElementById('class-student-class-name'),
+  classStudentTeacherName: document.getElementById('class-student-teacher-name'),
+  classLeaveBtn: document.getElementById('class-leave-btn'),
+  classError: document.getElementById('class-error'),
+  worksheetBtn: document.getElementById('worksheet-btn'),
+  worksheetModal: document.getElementById('worksheet-modal'),
+  wsOpAll: document.getElementById('ws-op-all'),
+  wsOpChoices: document.querySelectorAll('.ws-op-choice'),
+  wsAllowNegatives: document.getElementById('ws-allow-negatives'),
+  wsProblemCount: document.getElementById('ws-problem-count'),
+  wsError: document.getElementById('ws-error'),
+  wsGenerateBtn: document.getElementById('ws-generate-btn'),
+  wsCloseBtn: document.getElementById('ws-close-btn'),
+  worksheetPrintRoot: document.getElementById('worksheet-print-root'),
   teacherPinSubmitBtn: document.getElementById('teacher-pin-submit-btn'),
   teacherPinCancelBtn: document.getElementById('teacher-pin-cancel-btn'),
   watchListModal: document.getElementById('watch-list-modal'),
@@ -198,11 +284,812 @@ function clearSeat(){
 }
 
 /* =========================================================
+   Player identity — optional Google sign-in as an alternative to typing
+   a name. Available for every mode (solo/vs/online), since it's just
+   the "Your name" field on step-name1. Anonymous play (typing a name)
+   remains the default and always available — this is purely additive.
+
+   Reuses the same signInWithGoogle()/signOutUser() from firebase.js as
+   the teacher Watch Games gate. That's intentional: it's the same
+   underlying Firebase Auth session either way, and nothing here makes
+   any access decision based on the account — a player's Google sign-in
+   never grants Watch Games access by itself (see handleTeacherGoogleSignIn,
+   which independently checks the email domain regardless of how/why the
+   user already happened to be signed in).
+   ========================================================= */
+
+function getMyName(){
+  if(state.googleUser) return state.googleUser.name;
+  return el.player1Name.value.trim();
+}
+
+/* Shared shape for state.googleUser, built from whatever Firebase Auth
+   User object signInWithGoogle() resolved with — used by both the
+   setup-screen sign-in and the My Stats sign-in, since they're the same
+   underlying identity. */
+function toGoogleUserRecord(user){
+  return {
+    uid: user.uid,
+    name: user.displayName || (user.email ? user.email.split('@')[0] : 'Player'),
+    photoURL: user.photoURL || '',
+    email: user.email || '',
+  };
+}
+
+/* Maps state.mode's internal values ('solo' | 'vs' | 'computer' | 'online')
+   to the stats storage key — 'vs' displays as "Same Device" and
+   'computer' as "vs Computer" in the My Stats table. */
+function modeToStatsKey(mode){
+  if(mode === 'vs') return 'sameDevice';
+  if(mode === 'computer') return 'vsComputer';
+  return mode;
+}
+
+/* Records a finished game against the signed-in player's persistent,
+   per-mode stats (see firebase.js's recordGameResult). A no-op for
+   anonymous players — by design, stats only exist for Google-signed-in
+   accounts. Best-effort: a failed write just means this one game
+   doesn't get counted, not a user-facing error, since it happens
+   invisibly after the winner modal is already showing. */
+/* Records a finished game against the signed-in player's persistent,
+   per-mode stats (see firebase.js's recordGameResult), then checks
+   whether that pushed any achievement badge over its threshold (see
+   badges.js). A no-op for anonymous players — by design, stats (and
+   therefore badges) only exist for Google-signed-in accounts.
+   Best-effort throughout: a failure here just means this one game
+   doesn't get counted / doesn't unlock a badge it otherwise would
+   have, not a user-facing error, since it all happens invisibly after
+   the winner modal is already showing.
+
+   `hadTimeControl` is passed in explicitly by each caller rather than
+   inferred here, since "was a timer on for this game" lives in a
+   different place depending on mode: state.timeControlSeconds for
+   local play, but state.room.settings.timeControlSeconds for online
+   (online has its own fully-synced turn-clock system — see
+   online.js's module comment — entirely separate from the local-only
+   state.timeControlSeconds, which online forces to 0 and never
+   actually uses for its own timer). Guessing from one shared variable
+   here previously caused the Beat the Clock badge to silently never
+   fire for online games even when a timer really was running. */
+async function recordMyStats(mode, correctCount, wrongCount, hadTimeControl){
+  if(!state.googleUser) return;
+  const uid = state.googleUser.uid;
+  try{
+    await recordGameResult(uid, modeToStatsKey(mode), correctCount || 0, wrongCount || 0);
+    const freshStats = await getPlayerStats(uid);
+    state.myBadges = new Set(Object.keys(freshStats.badges || {})); // in case another tab/session earned something since our last load
+    const newlyEarned = checkGameEndBadges(freshStats, state.myBadges, correctCount || 0, wrongCount || 0, !!hadTimeControl);
+    await awardAndCelebrateBadges(newlyEarned);
+  } catch(err){
+    console.error('Failed to record game stats:', err);
+  }
+}
+
+function updatePlayerIdentityUI(){
+  const signedIn = !!state.googleUser;
+  el.player1NameLabel.classList.toggle('hidden', signedIn);
+  el.player1Name.classList.toggle('hidden', signedIn);
+  el.googleDivider.classList.toggle('hidden', signedIn);
+  el.playerGoogleSigninBtn.classList.toggle('hidden', signedIn);
+  el.googleSigninNote.classList.toggle('hidden', signedIn);
+  el.playerProfileChip.classList.toggle('hidden', !signedIn);
+  updateFeedbackFabVisibility();
+  el.adminFeedbackBtn.classList.toggle('hidden', !isAdminAccount());
+  if(signedIn){
+    el.playerProfileName.textContent = state.googleUser.name;
+    if(state.googleUser.photoURL){
+      el.playerProfilePic.src = state.googleUser.photoURL;
+      el.playerProfilePic.classList.remove('hidden');
+    } else {
+      el.playerProfilePic.classList.add('hidden');
+    }
+    loadMyBadges(); // fire-and-forget — see loadMyBadges() below
+  } else {
+    state.myBadges = new Set();
+    if(!el.myStatsModal.classList.contains('hidden')){
+      renderMyStatsBadges(); // clear an already-open My Stats panel too, in the unlikely event someone signs out while it's open
+    }
+  }
+}
+
+async function handlePlayerGoogleSignIn(){
+  el.setupError.textContent = '';
+  el.playerGoogleSigninBtn.disabled = true;
+  let user;
+  try{
+    user = await signInWithGoogle();
+  } catch(err){
+    if(err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request'){
+      el.setupError.textContent = 'Google sign-in failed. Please try again.';
+    }
+    return;
+  } finally {
+    el.playerGoogleSigninBtn.disabled = false;
+  }
+  state.googleUser = toGoogleUserRecord(user);
+  updatePlayerIdentityUI();
+}
+
+async function handlePlayerGoogleSignOut(){
+  try{ await signOutUser(); } catch(e) { /* best-effort */ }
+  state.googleUser = null;
+  updatePlayerIdentityUI();
+}
+
+/* Auto-restores a persisted Google session on page load (see
+   watchAuthState()'s own comment in firebase.js for the full story).
+   Also fires on ordinary sign-in/sign-out, which just harmlessly
+   re-confirms state the explicit click handlers above already set —
+   not a problem, just a bit redundant in those cases. Anonymous
+   sessions (from ensureSignedIn(), used for online play) correctly
+   don't trigger this, since isGoogleUser() filters them out. */
+watchAuthState((user) => {
+  if(isGoogleUser(user)){
+    state.googleUser = toGoogleUserRecord(user);
+  } else if(state.googleUser){
+    state.googleUser = null;
+  }
+  updatePlayerIdentityUI();
+});
+
+/* =========================================================
+   My Stats panel — shows persistent, cross-device stats for whichever
+   Google account is signed in. Since state.googleUser is the same
+   identity used for gameplay (see above), signing in here also fills
+   in the player's name on the setup screen, and vice versa — there's
+   only ever one "signed in as" state per tab, not a separate one for
+   stats.
+   ========================================================= */
+
+function renderMyStatsPanel(){
+  const signedIn = !!state.googleUser;
+  el.myStatsSignedOut.classList.toggle('hidden', signedIn);
+  el.myStatsSignedIn.classList.toggle('hidden', !signedIn);
+  if(!signedIn) return;
+
+  el.myStatsProfileName.textContent = state.googleUser.name;
+  if(state.googleUser.photoURL){
+    el.myStatsProfilePic.src = state.googleUser.photoURL;
+    el.myStatsProfilePic.classList.remove('hidden');
+  } else {
+    el.myStatsProfilePic.classList.add('hidden');
+  }
+  renderMyStatsBadges(); // whatever's already cached — openMyStats() below refreshes this against Firebase right after
+}
+
+/* Formats one mode's numbers into a { games, accuracy } pair for the
+   table — shared by each mode row and the "All Modes" total row (which
+   just gets pre-summed counts passed in instead of a single mode's). */
+function formatStatsRow(gamesPlayed, correctCount, wrongCount){
+  const total = correctCount + wrongCount;
+  return {
+    games: gamesPlayed || 0,
+    accuracy: total === 0 ? 'N/A' : Math.round((correctCount / total) * 100) + '%',
+  };
+}
+
+/* Sums a getPlayerStats() result across all 4 modes — used for the "All
+   Modes" row here, and reused by the class roster (a teacher's roster
+   only needs one overall number per student, not a full per-mode
+   breakdown for every row). */
+function sumAllModes(stats){
+  let games = 0, correct = 0, wrong = 0;
+  STATS_MODES.forEach((modeKey) => {
+    games += stats[modeKey].gamesPlayed;
+    correct += stats[modeKey].correctCount;
+    wrong += stats[modeKey].wrongCount;
+  });
+  return formatStatsRow(games, correct, wrong);
+}
+
+async function openMyStats(){
+  el.myStatsError.textContent = '';
+  el.myStatsModal.classList.remove('hidden');
+  renderMyStatsPanel();
+  if(!state.googleUser) return;
+
+  [
+    el.myStatsTotalGames, el.myStatsTotalAccuracy,
+    el.myStatsSoloGames, el.myStatsSoloAccuracy,
+    el.myStatsSameDeviceGames, el.myStatsSameDeviceAccuracy,
+    el.myStatsVsComputerGames, el.myStatsVsComputerAccuracy,
+    el.myStatsOnlineGames, el.myStatsOnlineAccuracy,
+  ].forEach(cell => { cell.textContent = '\u2026'; });
+
+  try{
+    const stats = await getPlayerStats(state.googleUser.uid);
+    state.myBadges = new Set(Object.keys(stats.badges || {}));
+    renderMyStatsBadges();
+
+    const solo = formatStatsRow(stats.solo.gamesPlayed, stats.solo.correctCount, stats.solo.wrongCount);
+    const sameDevice = formatStatsRow(stats.sameDevice.gamesPlayed, stats.sameDevice.correctCount, stats.sameDevice.wrongCount);
+    const vsComputer = formatStatsRow(stats.vsComputer.gamesPlayed, stats.vsComputer.correctCount, stats.vsComputer.wrongCount);
+    const online = formatStatsRow(stats.online.gamesPlayed, stats.online.correctCount, stats.online.wrongCount);
+    const total = sumAllModes(stats);
+
+    el.myStatsTotalGames.textContent = total.games;
+    el.myStatsTotalAccuracy.textContent = total.accuracy;
+    el.myStatsSoloGames.textContent = solo.games;
+    el.myStatsSoloAccuracy.textContent = solo.accuracy;
+    el.myStatsSameDeviceGames.textContent = sameDevice.games;
+    el.myStatsSameDeviceAccuracy.textContent = sameDevice.accuracy;
+    el.myStatsVsComputerGames.textContent = vsComputer.games;
+    el.myStatsVsComputerAccuracy.textContent = vsComputer.accuracy;
+    el.myStatsOnlineGames.textContent = online.games;
+    el.myStatsOnlineAccuracy.textContent = online.accuracy;
+
+    await renderClassSection(stats);
+  } catch(err){
+    el.myStatsError.textContent = 'Could not load your stats. Please try again.';
+    console.error(err);
+  }
+}
+
+/* =========================================================
+   My Class — lives inside the My Stats panel. Which of the 4 blocks
+   shows depends only on the signed-in account's email domain (the same
+   TEACHER_EMAIL_DOMAIN check the Watch Games gate already uses) and,
+   for players, whether they're currently in a class at all.
+   ========================================================= */
+
+function isTeacherAccount(){
+  const email = (state.googleUser?.email || '').toLowerCase();
+  return email.endsWith('@' + TEACHER_EMAIL_DOMAIN);
+}
+
+function isAdminAccount(){
+  const email = (state.googleUser?.email || '').toLowerCase();
+  return email === ADMIN_EMAIL.toLowerCase();
+}
+
+async function renderClassSection(myStats){
+  el.classError.textContent = '';
+  el.classTeacherSection.classList.add('hidden');
+  el.classStudentJoin.classList.add('hidden');
+  el.classStudentView.classList.add('hidden');
+  el.classRemovedNote.classList.add('hidden');
+  el.myClassHeading.textContent = isTeacherAccount() ? 'My Classes' : 'My Class';
+
+  if(isTeacherAccount()){
+    el.classTeacherSection.classList.remove('hidden');
+    let classes;
+    try{
+      classes = await getMyClasses(state.googleUser.uid);
+    } catch(err){
+      el.classError.textContent = 'Could not load your classes.';
+      console.error(err);
+      return;
+    }
+    el.classNameInput.value = '';
+    const atLimit = classes.length >= MAX_CLASSES_PER_TEACHER;
+    el.classCreateFields.classList.toggle('hidden', atLimit);
+    el.classCreateBtn.disabled = atLimit;
+    el.classNameInput.disabled = atLimit;
+    el.classLimitNote.classList.toggle('hidden', !atLimit);
+    await renderClassList(classes);
+  } else if(myStats.classTeacherUid){
+    // A class the student's playerStats points at may have been deleted,
+    // or the teacher may have removed just this student from its roster,
+    // since the last time this loaded — check before trusting the cached
+    // className/classTeacherName on myStats.
+    let stillMember;
+    try{
+      stillMember = await verifyClassMembership(state.googleUser.uid, myStats.classTeacherUid, myStats.classId);
+    } catch(err){
+      // Can't verify (e.g. offline) — fail open and show the cached view
+      // rather than bouncing the student to the join screen incorrectly.
+      console.error('Could not verify class membership:', err);
+      stillMember = true;
+    }
+    if(!stillMember){
+      el.classStudentJoin.classList.remove('hidden');
+      el.classRemovedNote.classList.remove('hidden');
+      return;
+    }
+    el.classStudentView.classList.remove('hidden');
+    el.classStudentClassName.textContent = myStats.className || 'a class';
+    el.classStudentTeacherName.textContent = myStats.classTeacherName || 'your teacher';
+  } else {
+    el.classStudentJoin.classList.remove('hidden');
+  }
+}
+
+// Which class's roster is currently showing in the nav — module-level so
+// it survives across renders (e.g. after a student's stats change) and so
+// switching tabs doesn't need a fresh Firebase fetch. Reset to null
+// whenever the signed-in account changes (see renderClassSection).
+let selectedClassId = null;
+
+async function renderClassList(classes){
+  el.classList.innerHTML = '';
+  if(classes.length === 0){
+    selectedClassId = null;
+    return;
+  }
+
+  // Fall back to the first class if nothing's selected yet, or the
+  // previously-selected class no longer exists (e.g. this teacher's list
+  // just changed).
+  if(!selectedClassId || !classes.some((c) => c.classId === selectedClassId)){
+    selectedClassId = classes[0].classId;
+  }
+
+  const nav = document.createElement('div');
+  nav.className = 'class-nav';
+  nav.setAttribute('role', 'tablist');
+  classes.forEach((cls) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'class-nav-tab';
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', String(cls.classId === selectedClassId));
+    tab.classList.toggle('active', cls.classId === selectedClassId);
+    tab.textContent = cls.name || 'Untitled Class';
+    tab.addEventListener('click', () => {
+      if(selectedClassId === cls.classId) return;
+      selectedClassId = cls.classId;
+      renderClassList(classes); // reuses the already-fetched roster data
+    });
+    nav.appendChild(tab);
+  });
+  el.classList.appendChild(nav);
+
+  const selectedClass = classes.find((c) => c.classId === selectedClassId);
+  await renderClassCard(selectedClass);
+}
+
+async function renderClassCard(cls){
+  const card = document.createElement('div');
+  card.className = 'class-card';
+
+  const header = document.createElement('div');
+  header.className = 'class-card-header';
+
+  const nameWrap = document.createElement('span');
+  nameWrap.className = 'class-card-name-wrap';
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'class-card-name';
+  nameSpan.textContent = cls.name || 'Untitled Class';
+  const renameBtn = document.createElement('button');
+  renameBtn.type = 'button';
+  renameBtn.className = 'class-rename-btn';
+  renameBtn.textContent = 'Rename';
+  renameBtn.setAttribute('aria-label', `Rename ${cls.name || 'Untitled Class'}`);
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'class-rename-btn class-delete-btn';
+  deleteBtn.textContent = 'Delete';
+  deleteBtn.setAttribute('aria-label', `Delete ${cls.name || 'Untitled Class'}`);
+  nameWrap.append(nameSpan, renameBtn, deleteBtn);
+
+  const codeWrap = document.createElement('span');
+  codeWrap.className = 'class-card-code';
+  codeWrap.append('Code: ');
+  const codeValue = document.createElement('span');
+  codeValue.className = 'class-code-value';
+  codeValue.textContent = cls.joinCode;
+  codeWrap.appendChild(codeValue);
+  header.append(nameWrap, codeWrap);
+  card.appendChild(header);
+
+  const renameRow = document.createElement('div');
+  renameRow.className = 'class-rename-row hidden';
+  const renameInput = document.createElement('input');
+  renameInput.type = 'text';
+  renameInput.maxLength = 40;
+  renameInput.className = 'class-rename-input';
+  renameInput.placeholder = 'e.g. Grade 7 - Section A';
+  const renameSaveBtn = document.createElement('button');
+  renameSaveBtn.type = 'button';
+  renameSaveBtn.className = 'secondary-btn class-rename-save';
+  renameSaveBtn.textContent = 'Save';
+  const renameCancelBtn = document.createElement('button');
+  renameCancelBtn.type = 'button';
+  renameCancelBtn.className = 'text-link-btn class-rename-cancel';
+  renameCancelBtn.textContent = 'Cancel';
+  const renameError = document.createElement('p');
+  renameError.className = 'setup-error class-rename-error';
+  renameRow.append(renameInput, renameSaveBtn, renameCancelBtn, renameError);
+  card.appendChild(renameRow);
+
+  const deleteRow = document.createElement('div');
+  deleteRow.className = 'class-rename-row hidden';
+  const deleteWarning = document.createElement('p');
+  deleteWarning.className = 'class-delete-warning';
+  deleteWarning.textContent = `Delete "${cls.name || 'Untitled Class'}"? This can't be undone.`;
+  const deleteConfirmBtn = document.createElement('button');
+  deleteConfirmBtn.type = 'button';
+  deleteConfirmBtn.className = 'secondary-btn class-delete-confirm';
+  deleteConfirmBtn.textContent = 'Delete Class';
+  const deleteCancelBtn = document.createElement('button');
+  deleteCancelBtn.type = 'button';
+  deleteCancelBtn.className = 'text-link-btn class-rename-cancel';
+  deleteCancelBtn.textContent = 'Cancel';
+  const deleteError = document.createElement('p');
+  deleteError.className = 'setup-error class-rename-error';
+  deleteRow.append(deleteWarning, deleteConfirmBtn, deleteCancelBtn, deleteError);
+  card.appendChild(deleteRow);
+
+  function openRenameRow(){
+    deleteRow.classList.add('hidden');
+    deleteError.textContent = '';
+    renameError.textContent = '';
+    renameInput.value = cls.name || '';
+    renameRow.classList.remove('hidden');
+    renameInput.focus();
+    renameInput.select();
+  }
+  function closeRenameRow(){
+    renameRow.classList.add('hidden');
+    renameError.textContent = '';
+  }
+  async function saveRename(){
+    const newName = renameInput.value.trim();
+    if(!newName){
+      renameError.textContent = 'Please enter a class name.';
+      return;
+    }
+    if(newName === cls.name){
+      closeRenameRow();
+      return;
+    }
+    renameSaveBtn.disabled = true;
+    try{
+      await renameClass(state.googleUser.uid, cls.classId, cls.joinCode, newName);
+      const stats = await getPlayerStats(state.googleUser.uid);
+      await renderClassSection(stats); // refetches + re-renders nav & card with the new name
+    } catch(err){
+      renameError.textContent = 'Could not rename the class. Please try again.';
+      console.error(err);
+      renameSaveBtn.disabled = false;
+    }
+  }
+
+  function openDeleteRow(){
+    renameRow.classList.add('hidden');
+    renameError.textContent = '';
+    deleteError.textContent = '';
+    deleteRow.classList.remove('hidden');
+  }
+  function closeDeleteRow(){
+    deleteRow.classList.add('hidden');
+    deleteError.textContent = '';
+  }
+  async function confirmDelete(){
+    deleteConfirmBtn.disabled = true;
+    try{
+      await deleteClass(state.googleUser.uid, cls.classId, cls.joinCode);
+      selectedClassId = null; // this class is gone — renderClassList falls back to the next one
+      const stats = await getPlayerStats(state.googleUser.uid);
+      await renderClassSection(stats);
+    } catch(err){
+      deleteError.textContent = 'Could not delete the class. Please try again.';
+      console.error(err);
+      deleteConfirmBtn.disabled = false;
+    }
+  }
+
+  renameBtn.addEventListener('click', openRenameRow);
+  renameCancelBtn.addEventListener('click', closeRenameRow);
+  renameSaveBtn.addEventListener('click', saveRename);
+  renameInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') saveRename();
+    if(e.key === 'Escape') closeRenameRow();
+  });
+
+  deleteBtn.addEventListener('click', openDeleteRow);
+  deleteCancelBtn.addEventListener('click', closeDeleteRow);
+  deleteConfirmBtn.addEventListener('click', confirmDelete);
+
+  const table = document.createElement('table');
+  table.className = 'stats-table';
+  table.innerHTML = '<thead><tr><th>Student</th><th>Games</th><th>Accuracy</th><th></th></tr></thead><tbody></tbody>';
+  const tbody = table.querySelector('tbody');
+  card.appendChild(table);
+
+  const emptyNote = document.createElement('p');
+  emptyNote.className = 'field-note';
+  emptyNote.textContent = 'No students have joined yet — share the code above.';
+  emptyNote.classList.toggle('hidden', cls.students.length > 0);
+  card.appendChild(emptyNote);
+
+  el.classList.appendChild(card);
+
+  if(cls.students.length > 0){
+    const rows = await Promise.all(cls.students.map(async (student) => {
+      try{
+        const stats = await getPlayerStats(student.uid);
+        const total = sumAllModes(stats);
+        return { uid: student.uid, name: student.name, games: total.games, accuracy: total.accuracy };
+      } catch(err){
+        console.error(`Failed to load stats for roster student ${student.uid}:`, err);
+        return { uid: student.uid, name: student.name, games: '\u2014', accuracy: '\u2014' };
+      }
+    }));
+    rows.forEach((row) => {
+      const tr = document.createElement('tr');
+      const nameTd = document.createElement('td');
+      nameTd.textContent = row.name;
+      const gamesTd = document.createElement('td');
+      gamesTd.textContent = row.games;
+      const accTd = document.createElement('td');
+      accTd.textContent = row.accuracy;
+
+      const removeTd = document.createElement('td');
+      removeTd.className = 'class-roster-remove-cell';
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'text-link-btn class-roster-remove-btn';
+      removeBtn.textContent = 'Remove';
+      removeBtn.setAttribute('aria-label', `Remove ${row.name} from ${cls.name || 'this class'}`);
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'text-link-btn class-rename-cancel hidden';
+      cancelBtn.textContent = 'Cancel';
+      let confirming = false;
+      function resetRemoveBtn(){
+        confirming = false;
+        removeBtn.textContent = 'Remove';
+        removeBtn.classList.remove('class-delete-btn');
+        removeBtn.disabled = false;
+        cancelBtn.classList.add('hidden');
+      }
+      removeBtn.addEventListener('click', async () => {
+        if(!confirming){
+          confirming = true;
+          removeBtn.textContent = 'Confirm?';
+          removeBtn.classList.add('class-delete-btn');
+          cancelBtn.classList.remove('hidden');
+          return;
+        }
+        removeBtn.disabled = true;
+        try{
+          await removeStudent(state.googleUser.uid, cls.classId, row.uid);
+          const stats = await getPlayerStats(state.googleUser.uid);
+          await renderClassSection(stats);
+        } catch(err){
+          console.error(`Failed to remove student ${row.uid} from class ${cls.classId}:`, err);
+          resetRemoveBtn();
+        }
+      });
+      cancelBtn.addEventListener('click', resetRemoveBtn);
+      removeTd.append(removeBtn, cancelBtn);
+
+      tr.append(nameTd, gamesTd, accTd, removeTd);
+      tbody.appendChild(tr);
+    });
+  }
+}
+
+el.classCreateBtn.addEventListener('click', async () => {
+  el.classError.textContent = '';
+  const className = el.classNameInput.value.trim();
+  if(!className){
+    el.classError.textContent = 'Please enter a class name.';
+    return;
+  }
+  el.classCreateBtn.disabled = true;
+  try{
+    const { classId } = await createClass(state.googleUser.uid, state.googleUser.name, className);
+    selectedClassId = classId; // show the newly created class right away
+    const stats = await getPlayerStats(state.googleUser.uid);
+    await renderClassSection(stats);
+  } catch(err){
+    el.classError.textContent = err.message === 'limit-reached'
+      ? `You've reached the limit of ${MAX_CLASSES_PER_TEACHER} classes.`
+      : 'Could not create your class. Please try again.';
+    console.error(err);
+  } finally {
+    el.classCreateBtn.disabled = false;
+  }
+});
+
+el.classJoinBtn.addEventListener('click', async () => {
+  el.classError.textContent = '';
+  const code = el.classJoinCodeInput.value.trim().toUpperCase();
+  if(!code){
+    el.classError.textContent = 'Please enter a class code.';
+    return;
+  }
+  el.classJoinBtn.disabled = true;
+  try{
+    await joinClass(code, state.googleUser.uid, state.googleUser.name);
+    el.classJoinCodeInput.value = '';
+    const stats = await getPlayerStats(state.googleUser.uid);
+    await renderClassSection(stats);
+  } catch(err){
+    el.classError.textContent = err.message === 'not-found'
+      ? 'That class code was not found. Double-check it with your teacher.'
+      : 'Could not join that class. Please try again.';
+    console.error(err);
+  } finally {
+    el.classJoinBtn.disabled = false;
+  }
+});
+
+el.classLeaveBtn.addEventListener('click', async () => {
+  el.classError.textContent = '';
+  el.classLeaveBtn.disabled = true;
+  try{
+    await leaveClass(state.googleUser.uid);
+    const stats = await getPlayerStats(state.googleUser.uid);
+    await renderClassSection(stats);
+  } catch(err){
+    el.classError.textContent = 'Could not leave the class. Please try again.';
+    console.error(err);
+  } finally {
+    el.classLeaveBtn.disabled = false;
+  }
+});
+
+async function handleMyStatsSignIn(){
+  el.myStatsError.textContent = '';
+  el.myStatsSigninBtn.disabled = true;
+  let user;
+  try{
+    user = await signInWithGoogle();
+  } catch(err){
+    if(err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request'){
+      el.myStatsError.textContent = 'Google sign-in failed. Please try again.';
+    }
+    return;
+  } finally {
+    el.myStatsSigninBtn.disabled = false;
+  }
+  state.googleUser = toGoogleUserRecord(user);
+  updatePlayerIdentityUI(); // this sign-in doubles as the setup screen's identity too
+  openMyStats(); // re-render now signed in, and fetch the actual numbers
+}
+
+/* =========================================================
+   Worksheet generator — same generateProblem()/buildProblemLayout() pure
+   functions gameplay itself uses, rendered into a screen-hidden root
+   that only becomes visible via @media print (see style.css). No
+   Firebase involved at all: no sign-in, no database, nothing billed —
+   this is pure client-side computation, thrown away once printed.
+   ========================================================= */
+
+el.wsOpAll.addEventListener('change', () => {
+  el.wsOpChoices.forEach(cb => { cb.checked = el.wsOpAll.checked; });
+});
+el.wsOpChoices.forEach(cb => {
+  cb.addEventListener('change', () => {
+    el.wsOpAll.checked = Array.from(el.wsOpChoices).every(c => c.checked);
+  });
+});
+
+/* A blank cell — unlike cellHTML() in the live game, there's no notion of
+   "already answered" here. Every cell is just an empty box for the
+   student to fill in by hand. */
+function wsCellHTML(){
+  return `<div class="cell-slot"></div>`;
+}
+
+function wsPartHTML(part){
+  return part.type === 'cell' ? wsCellHTML() : `<span class="inline-op">${part.symbol}</span>`;
+}
+
+/* Mirrors renderStackedLayout()'s structure exactly (same row types:
+   plain fraction / "product" / "whole"), just building a static string
+   instead of touching state or the live #problem-strip — so the printed
+   problem is structurally identical to what the game itself renders,
+   not a separate lookalike. */
+function wsProblemHTML(problem, layout, index){
+  const { a, b, op, c, d } = problem;
+  let html = `<div class="ws-problem">`;
+  html += `<div class="ws-problem-number">${index + 1}.</div>`;
+  html += `<div class="given-row">`;
+  html += fracHTML(a, b);
+  html += `<span class="operator-symbol">${op}</span>`;
+  html += fracHTML(c, d);
+  html += `</div>`;
+
+  layout.rows.forEach(row => {
+    html += `<div class="cross-row-wrap">`;
+    if(row.caption){ html += `<div class="row-caption">${row.caption}</div>`; }
+    html += `<div class="cross-row">`;
+    html += `<span class="row-equals">=</span>`;
+
+    if(row.kind === 'product'){
+      html += `<div class="fraction-product">`;
+      row.fractions.forEach((frac, idx) => {
+        html += `<div class="cross-fraction">`;
+        html += `<div class="row-numerator">${wsPartHTML(frac.numerator)}</div>`;
+        html += `<div class="row-line"></div>`;
+        html += `<div class="row-denominator">${wsPartHTML(frac.denominator)}</div>`;
+        html += `</div>`;
+        if(idx < row.fractions.length - 1){
+          html += `<span class="inline-op">${row.operator}</span>`;
+        }
+      });
+      html += `</div>`;
+    } else if(row.kind === 'whole'){
+      html += wsPartHTML(row.value);
+    } else {
+      html += `<div class="cross-fraction">`;
+      html += `<div class="row-numerator">${row.numerator.map(wsPartHTML).join('')}</div>`;
+      html += `<div class="row-line"></div>`;
+      html += `<div class="row-denominator">${row.denominator.map(wsPartHTML).join('')}</div>`;
+      html += `</div>`;
+    }
+
+    html += `</div></div>`;
+  });
+
+  html += `</div>`; // .ws-problem
+  return html;
+}
+
+function wsAnswerKeyHTML(entries){
+  let html = `<div class="ws-answer-key">`;
+  html += `<h2>Answer Key</h2>`;
+  entries.forEach((entry, i) => {
+    const parts = entry.layout.cells.map(c => `${c.label}: ${c.correct}`).join(' \u00B7 ');
+    html += `<div class="ws-answer-item"><strong>${i + 1}.</strong> ${parts}</div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function handleGenerateWorksheet(){
+  el.wsError.textContent = '';
+  const selectedOps = Array.from(el.wsOpChoices).filter(cb => cb.checked).map(cb => cb.dataset.op);
+  if(selectedOps.length === 0){
+    el.wsError.textContent = 'Please select at least one operation.';
+    return;
+  }
+  const allowNegatives = el.wsAllowNegatives.checked;
+  const count = parseInt(el.wsProblemCount.value, 10);
+
+  const entries = [];
+  for(let i = 0; i < count; i++){
+    const problem = generateProblem({ allowedOps: selectedOps, allowNegatives });
+    const layout = buildProblemLayout(problem);
+    entries.push({ problem, layout });
+  }
+
+  let html = `<div class="ws-header">
+    <h1>AAT's Dueling Ratios &mdash; Practice Worksheet</h1>
+    <div class="ws-header-fields"><span>Name: ________________________</span><span>Date: ____________</span></div>
+  </div>`;
+  html += `<div class="ws-problems">`;
+  entries.forEach((entry, i) => { html += wsProblemHTML(entry.problem, entry.layout, i); });
+  html += `</div>`;
+  html += wsAnswerKeyHTML(entries);
+
+  el.worksheetPrintRoot.innerHTML = html;
+  el.worksheetModal.classList.add('hidden');
+  // Brief delay so the modal-hide reflow settles before the print dialog
+  // (which freezes the page) opens.
+  setTimeout(() => window.print(), 50);
+}
+
+window.addEventListener('afterprint', () => {
+  el.worksheetPrintRoot.innerHTML = ''; // don't keep a stale worksheet's DOM around
+});
+
+el.worksheetBtn.addEventListener('click', () => {
+  el.wsError.textContent = '';
+  el.worksheetModal.classList.remove('hidden');
+});
+el.wsCloseBtn.addEventListener('click', () => {
+  el.worksheetModal.classList.add('hidden');
+});
+el.worksheetModal.addEventListener('click', (e) => {
+  if(e.target === el.worksheetModal) el.worksheetModal.classList.add('hidden');
+});
+el.wsGenerateBtn.addEventListener('click', handleGenerateWorksheet);
+
+/* =========================================================
    Setup screen wiring
    ========================================================= */
 
+el.playerGoogleSigninBtn.addEventListener('click', handlePlayerGoogleSignIn);
+el.playerGoogleSignoutBtn.addEventListener('click', handlePlayerGoogleSignOut);
+
 el.modeSolo.addEventListener('click', () => selectMode('solo'));
 el.modeVs.addEventListener('click', () => selectMode('vs'));
+el.modeComputer.addEventListener('click', () => selectMode('computer'));
 el.modeOnline.addEventListener('click', () => selectMode('online'));
 el.startBtn.addEventListener('click', handlePrimaryButtonClick);
 el.rematchBtn.addEventListener('click', handleRematchClick);
@@ -223,6 +1110,201 @@ el.instructionsModal.addEventListener('click', (e) => {
 });
 el.creditsPhoto.src = creditsPhotoUrl;
 
+/* =========================================================
+   Feedback FAB — only visible when BOTH:
+     (a) signed in with a Google account, AND
+     (b) the opening/setup screen (#setup-modal) is the thing currently
+         showing — not mid-game, not while some other modal is open.
+
+   Rather than patch every one of the ~15 places elsewhere in this file
+   that show/hide #setup-modal, a MutationObserver watches its class
+   attribute directly and re-evaluates from there. That keeps this
+   correct automatically regardless of which code path changes the
+   setup screen's visibility, now or in the future — no risk of a
+   missed call site leaving the FAB visible somewhere it shouldn't be.
+   ========================================================= */
+
+function updateFeedbackFabVisibility(){
+  const onSetupScreen = !el.setupModal.classList.contains('hidden');
+  const signedIn = !!state.googleUser;
+  el.feedbackFab.classList.toggle('hidden', !(signedIn && onSetupScreen));
+}
+
+new MutationObserver(updateFeedbackFabVisibility)
+  .observe(el.setupModal, { attributes: true, attributeFilter: ['class'] });
+
+function openFeedbackModal(){
+  el.feedbackFormView.classList.remove('hidden');
+  el.feedbackThanksView.classList.add('hidden');
+  el.feedbackMessageInput.value = '';
+  el.feedbackError.textContent = '';
+  el.feedbackSubmitBtn.disabled = false;
+  el.feedbackModal.classList.remove('hidden');
+  el.feedbackMessageInput.focus();
+}
+
+function closeFeedbackModal(){
+  el.feedbackModal.classList.add('hidden');
+}
+
+async function handleFeedbackSubmit(){
+  if(!state.googleUser) return; // FAB shouldn't be reachable otherwise, but guard anyway
+  el.feedbackError.textContent = '';
+  const message = el.feedbackMessageInput.value.trim();
+  if(!message){
+    el.feedbackError.textContent = 'Please enter your feedback before sending.';
+    return;
+  }
+  el.feedbackSubmitBtn.disabled = true;
+  try{
+    await submitFeedback(state.googleUser.uid, state.googleUser.name, message);
+    el.feedbackFormView.classList.add('hidden');
+    el.feedbackThanksView.classList.remove('hidden');
+    setTimeout(closeFeedbackModal, 1600);
+  } catch(err){
+    el.feedbackError.textContent = 'Could not send your feedback. Please try again.';
+    console.error('Failed to submit feedback:', err);
+    el.feedbackSubmitBtn.disabled = false;
+  }
+}
+
+el.feedbackFab.addEventListener('click', openFeedbackModal);
+el.closeFeedbackBtn.addEventListener('click', closeFeedbackModal);
+el.feedbackModal.addEventListener('click', (e) => {
+  if(e.target === el.feedbackModal) closeFeedbackModal();
+});
+el.feedbackSubmitBtn.addEventListener('click', handleFeedbackSubmit);
+el.feedbackMessageInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleFeedbackSubmit();
+});
+
+/* =========================================================
+   Admin feedback viewer — chip only visible to ADMIN_EMAIL (toggled
+   above in updatePlayerIdentityUI). Fetches every entry in one read
+   (see getAllFeedback in firebase.js) and paginates client-side, 5 per
+   page, since expected volume is small enough that this is simpler
+   than Firebase's cursor-based paging.
+   ========================================================= */
+
+const ADMIN_FEEDBACK_PAGE_SIZE = 5;
+let adminFeedbackEntries = [];
+let adminFeedbackPage = 0;
+
+function renderAdminFeedbackPage(){
+  el.adminFeedbackList.innerHTML = '';
+  const totalPages = Math.max(1, Math.ceil(adminFeedbackEntries.length / ADMIN_FEEDBACK_PAGE_SIZE));
+  adminFeedbackPage = Math.min(adminFeedbackPage, totalPages - 1);
+  const start = adminFeedbackPage * ADMIN_FEEDBACK_PAGE_SIZE;
+  const pageEntries = adminFeedbackEntries.slice(start, start + ADMIN_FEEDBACK_PAGE_SIZE);
+
+  el.adminFeedbackEmpty.classList.toggle('hidden', adminFeedbackEntries.length > 0);
+  el.adminFeedbackPagination.classList.toggle('hidden', adminFeedbackEntries.length <= ADMIN_FEEDBACK_PAGE_SIZE);
+  el.adminFeedbackPrevBtn.disabled = adminFeedbackPage === 0;
+  el.adminFeedbackNextBtn.disabled = adminFeedbackPage >= totalPages - 1;
+  el.adminFeedbackPageLabel.textContent = `Page ${adminFeedbackPage + 1} of ${totalPages}`;
+
+  pageEntries.forEach((entry) => {
+    const card = document.createElement('div');
+    card.className = 'admin-feedback-entry';
+
+    const meta = document.createElement('div');
+    meta.className = 'admin-feedback-meta';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'admin-feedback-name';
+    nameSpan.textContent = entry.name || 'Anonymous';
+    const dateSpan = document.createElement('span');
+    dateSpan.className = 'admin-feedback-date';
+    dateSpan.textContent = entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '';
+    meta.append(nameSpan, dateSpan);
+
+    const message = document.createElement('p');
+    message.className = 'admin-feedback-message';
+    message.textContent = entry.message || '';
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'text-link-btn class-rename-btn admin-feedback-delete-btn';
+    deleteBtn.textContent = 'Delete';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'text-link-btn class-rename-cancel hidden';
+    cancelBtn.textContent = 'Cancel';
+    let confirming = false;
+    function resetDeleteBtn(){
+      confirming = false;
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.classList.remove('class-delete-btn');
+      deleteBtn.disabled = false;
+      cancelBtn.classList.add('hidden');
+    }
+    deleteBtn.addEventListener('click', async () => {
+      if(!confirming){
+        confirming = true;
+        deleteBtn.textContent = 'Confirm?';
+        deleteBtn.classList.add('class-delete-btn');
+        cancelBtn.classList.remove('hidden');
+        return;
+      }
+      deleteBtn.disabled = true;
+      try{
+        await deleteFeedback(entry.id);
+        adminFeedbackEntries = adminFeedbackEntries.filter((e) => e.id !== entry.id);
+        renderAdminFeedbackPage();
+      } catch(err){
+        console.error(`Failed to delete feedback ${entry.id}:`, err);
+        resetDeleteBtn();
+      }
+    });
+    cancelBtn.addEventListener('click', resetDeleteBtn);
+
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'admin-feedback-actions';
+    actionsRow.append(deleteBtn, cancelBtn);
+
+    card.append(meta, message, actionsRow);
+    el.adminFeedbackList.appendChild(card);
+  });
+}
+
+async function openAdminFeedbackModal(){
+  el.adminFeedbackError.textContent = '';
+  el.adminFeedbackList.innerHTML = '';
+  el.adminFeedbackEmpty.classList.add('hidden');
+  el.adminFeedbackPagination.classList.add('hidden');
+  el.adminFeedbackModal.classList.remove('hidden');
+  try{
+    adminFeedbackEntries = await getAllFeedback();
+    adminFeedbackPage = 0;
+    renderAdminFeedbackPage();
+  } catch(err){
+    el.adminFeedbackError.textContent = 'Could not load feedback. Please try again.';
+    console.error('Failed to load admin feedback:', err);
+  }
+}
+
+function closeAdminFeedbackModal(){
+  el.adminFeedbackModal.classList.add('hidden');
+}
+
+el.adminFeedbackBtn.addEventListener('click', openAdminFeedbackModal);
+el.closeAdminFeedbackBtn.addEventListener('click', closeAdminFeedbackModal);
+el.adminFeedbackModal.addEventListener('click', (e) => {
+  if(e.target === el.adminFeedbackModal) closeAdminFeedbackModal();
+});
+el.adminFeedbackPrevBtn.addEventListener('click', () => {
+  if(adminFeedbackPage > 0){
+    adminFeedbackPage--;
+    renderAdminFeedbackPage();
+  }
+});
+el.adminFeedbackNextBtn.addEventListener('click', () => {
+  const totalPages = Math.max(1, Math.ceil(adminFeedbackEntries.length / ADMIN_FEEDBACK_PAGE_SIZE));
+  if(adminFeedbackPage < totalPages - 1){
+    adminFeedbackPage++;
+    renderAdminFeedbackPage();
+  }
+});
+
 el.reviewMissedBtn.addEventListener('click', () => {
   renderMissedReview();
   el.reviewModal.classList.remove('hidden');
@@ -239,10 +1321,10 @@ el.onlineJoinBtn.addEventListener('click', () => selectOnlineChoice('join'));
 el.onlineFindBtn.addEventListener('click', () => selectOnlineChoice('find'));
 
 el.watchGamesBtn.addEventListener('click', () => {
-  el.teacherPinInput.value = '';
   el.teacherPinError.textContent = '';
+  el.teacherPinSubmitBtn.disabled = false;
+  el.teacherPinSubmitBtn.textContent = 'Sign in with Google';
   el.teacherPinModal.classList.remove('hidden');
-  el.teacherPinInput.focus();
 });
 el.teacherPinCancelBtn.addEventListener('click', () => {
   el.teacherPinModal.classList.add('hidden');
@@ -250,10 +1332,17 @@ el.teacherPinCancelBtn.addEventListener('click', () => {
 el.teacherPinModal.addEventListener('click', (e) => {
   if(e.target === el.teacherPinModal) el.teacherPinModal.classList.add('hidden');
 });
-el.teacherPinSubmitBtn.addEventListener('click', submitTeacherPin);
-el.teacherPinInput.addEventListener('keydown', (e) => {
-  if(e.key === 'Enter') submitTeacherPin();
+el.teacherPinSubmitBtn.addEventListener('click', handleTeacherGoogleSignIn);
+
+el.myStatsBtn.addEventListener('click', openMyStats);
+el.myStatsCloseBtn.addEventListener('click', () => {
+  el.myStatsModal.classList.add('hidden');
 });
+el.myStatsModal.addEventListener('click', (e) => {
+  if(e.target === el.myStatsModal) el.myStatsModal.classList.add('hidden');
+});
+el.myStatsSigninBtn.addEventListener('click', handleMyStatsSignIn);
+
 el.closeWatchListBtn.addEventListener('click', closeWatchList);
 el.watchListModal.addEventListener('click', (e) => {
   if(e.target === el.watchListModal) closeWatchList();
@@ -267,6 +1356,7 @@ el.rejoinDismissBtn.addEventListener('click', () => {
 });
 
 updateStepVisibility(); // initial state: nothing mode-dependent shown until a mode is picked
+updatePlayerIdentityUI(); // initial state: plain name input, not signed in
 checkForRejoinableSeat(); // offer to reconnect if this browser has an unfinished game saved
 
 el.opAll.addEventListener('change', () => {
@@ -285,6 +1375,7 @@ function selectMode(mode){
   stopWatchingChallenge(); // ...and stop watching a pending challenge, if one was in flight
   el.modeSolo.classList.toggle('selected', mode === 'solo');
   el.modeVs.classList.toggle('selected', mode === 'vs');
+  el.modeComputer.classList.toggle('selected', mode === 'computer');
   el.modeOnline.classList.toggle('selected', mode === 'online');
   el.onlineCreateBtn.classList.remove('selected');
   el.onlineJoinBtn.classList.remove('selected');
@@ -292,6 +1383,16 @@ function selectMode(mode){
   el.setupError.textContent = '';
   updateStepVisibility();
 }
+
+function selectDifficulty(level){
+  state.difficulty = level;
+  el.difficultyChoices.forEach(btn => {
+    btn.classList.toggle('selected', btn.dataset.difficulty === level);
+  });
+}
+el.difficultyChoices.forEach(btn => {
+  btn.addEventListener('click', () => selectDifficulty(btn.dataset.difficulty));
+});
 
 function selectOnlineChoice(choice){
   state.onlineChoice = choice;
@@ -309,6 +1410,7 @@ function updateStepVisibility(){
   const { mode, onlineChoice } = state;
 
   el.stepName2.classList.toggle('hidden', mode !== 'vs');
+  el.stepDifficulty.classList.toggle('hidden', mode !== 'computer');
   el.stepOnlineChoice.classList.toggle('hidden', mode !== 'online');
   el.stepJoinCode.classList.toggle('hidden', !(mode === 'online' && onlineChoice === 'join'));
   el.stepFindOpponent.classList.toggle('hidden', !(mode === 'online' && onlineChoice === 'find'));
@@ -317,7 +1419,7 @@ function updateStepVisibility(){
   // them; online only shows them once "Create Game" is chosen (a guest —
   // whether joining by code or by challenging from the lobby — inherits
   // whatever the host picked, so they don't choose anything).
-  const showHostSettings = (mode === 'solo' || mode === 'vs') || (mode === 'online' && onlineChoice === 'create');
+  const showHostSettings = (mode === 'solo' || mode === 'vs' || mode === 'computer') || (mode === 'online' && onlineChoice === 'create');
   el.stepOperations.classList.toggle('hidden', !showHostSettings);
   el.stepNegatives.classList.toggle('hidden', !showHostSettings);
   el.stepPairCount.classList.toggle('hidden', !showHostSettings);
@@ -326,7 +1428,7 @@ function updateStepVisibility(){
   // Start button: only appears once we know what it should do. "Find
   // Opponent" has no single submit action — each lobby row has its own
   // Challenge button — so the generic Start button stays hidden for it.
-  const ready = mode === 'solo' || mode === 'vs' || (mode === 'online' && onlineChoice && onlineChoice !== 'find');
+  const ready = mode === 'solo' || mode === 'vs' || mode === 'computer' || (mode === 'online' && onlineChoice && onlineChoice !== 'find');
   el.startBtn.classList.toggle('hidden', !ready);
   if(mode === 'online'){
     el.startBtn.textContent = onlineChoice === 'join' ? 'Join Room' : 'Create Room';
@@ -346,11 +1448,11 @@ function handlePrimaryButtonClick(){
 
 function tryStartGame(){
   state.missLog = [];
-  const name1 = el.player1Name.value.trim();
+  const name1 = getMyName();
   const name2 = el.player2Name.value.trim();
 
   if(!name1){
-    el.setupError.textContent = 'Please enter your name.';
+    el.setupError.textContent = 'Please enter your name, or sign in with Google.';
     return;
   }
   if(!state.mode){
@@ -372,9 +1474,10 @@ function tryStartGame(){
 
   state.timeControlSeconds = parseInt(el.timeControlSelect.value, 10);
 
-  state.players = [{ name: name1, score: 0, timeRemaining: state.timeControlSeconds, correctCount: 0, wrongCount: 0 }];
-  if(state.mode === 'vs'){
-    state.players.push({ name: name2, score: 0, timeRemaining: state.timeControlSeconds, correctCount: 0, wrongCount: 0 });
+  state.players = [{ name: name1, score: 0, timeRemaining: state.timeControlSeconds, correctCount: 0, wrongCount: 0, streak: 0 }];
+  if(state.mode === 'vs' || state.mode === 'computer'){
+    const name2Final = state.mode === 'computer' ? 'Computer' : name2;
+    state.players.push({ name: name2Final, score: 0, timeRemaining: state.timeControlSeconds, correctCount: 0, wrongCount: 0, streak: 0 });
     el.chipP2.classList.remove('hidden');
   } else {
     el.chipP2.classList.add('hidden');
@@ -386,7 +1489,7 @@ function tryStartGame(){
 
   const timerOn = state.timeControlSeconds > 0;
   el.chipP1Timer.classList.toggle('hidden', !timerOn);
-  el.chipP2Timer.classList.toggle('hidden', !timerOn || state.mode !== 'vs');
+  el.chipP2Timer.classList.toggle('hidden', !timerOn || !(state.mode === 'vs' || state.mode === 'computer'));
 
   state.totalPairs = parseInt(el.pairCountSelect.value, 10);
   state.pairIndex = 0;
@@ -407,6 +1510,8 @@ function resetToSetup(){
   closeLobby();
   stopWatchingChallenge();
   el.teacherPinModal.classList.add('hidden');
+  el.myStatsModal.classList.add('hidden');
+  el.worksheetModal.classList.add('hidden');
   state.missLog = [];
   state.rematchFinalizing = false;
   el.reviewModal.classList.add('hidden');
@@ -467,9 +1572,9 @@ async function cancelWaiting(){
 }
 
 async function handleCreateGame(){
-  const name1 = el.player1Name.value.trim();
+  const name1 = getMyName();
   if(!name1){
-    el.setupError.textContent = 'Please enter your name.';
+    el.setupError.textContent = 'Please enter your name, or sign in with Google.';
     return;
   }
   const selectedOps = Array.from(el.opChoices).filter(cb => cb.checked).map(cb => cb.dataset.op);
@@ -512,10 +1617,10 @@ async function handleCreateGame(){
 }
 
 async function handleJoinGame(){
-  const name1 = el.player1Name.value.trim();
+  const name1 = getMyName();
   const code = el.joinCodeInput.value.trim().toUpperCase();
   if(!name1){
-    el.setupError.textContent = 'Please enter your name.';
+    el.setupError.textContent = 'Please enter your name, or sign in with Google.';
     return;
   }
   if(code.length !== 4){
@@ -626,9 +1731,9 @@ function renderLobby(roomsObj){
 }
 
 async function handleChallenge(code, hostName){
-  const name1 = el.player1Name.value.trim();
+  const name1 = getMyName();
   if(!name1){
-    el.setupError.textContent = 'Please enter your name.';
+    el.setupError.textContent = 'Please enter your name, or sign in with Google.';
     return;
   }
   el.setupError.textContent = '';
@@ -907,10 +2012,10 @@ function onRoomUpdate(room){
   const guestP = room.players.guest;
   state.players = guestP
     ? [
-        { name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount },
-        { name: guestP.name, score: guestP.score, correctCount: guestP.correctCount, wrongCount: guestP.wrongCount },
+        { name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount, streak: hostP.streak || 0 },
+        { name: guestP.name, score: guestP.score, correctCount: guestP.correctCount, wrongCount: guestP.wrongCount, streak: guestP.streak || 0 },
       ]
-    : [{ name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount }];
+    : [{ name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount, streak: hostP.streak || 0 }];
   state.currentPlayer = room.turn === 'host' ? 0 : 1;
 
   // Shared milestone sounds: both devices receive this same update through
@@ -921,7 +2026,37 @@ function onRoomUpdate(room){
   const prevGuestPresent = !!prevRoom?.players?.guest;
   if(!prevGuestPresent && guestP) playSound('start');
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
-  if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
+  if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished'){
+    playSound('winner');
+    const myFinishedP = state.myRole === 'host' ? hostP : guestP;
+    recordMyStats('online', myFinishedP.correctCount, myFinishedP.wrongCount, room.settings?.timeControlSeconds > 0);
+  }
+  // Streak popups: same idea as the sounds above — diff prev-vs-new so
+  // both devices fire the identical popup for whichever player actually
+  // crossed a milestone, regardless of which client is looking. Guarded
+  // on prevRoom so a fresh subscribe (e.g. reconnect mid-game) doesn't
+  // replay a popup for a streak that was already reached earlier.
+  if(prevRoom && guestP){
+    ['host', 'guest'].forEach((roleKey) => {
+      const prevStreak = prevRoom.players?.[roleKey]?.streak || 0;
+      const newStreak = room.players?.[roleKey]?.streak || 0;
+      if(newStreak > prevStreak && isStreakMilestone(newStreak)){
+        const roleName = roleKey === 'host' ? hostP.name : guestP.name;
+        const tier = streakTierFor(newStreak);
+        playSound(tier.sound);
+        showStreakPopup(streakPopupText(roleName, newStreak, true), tier.cssClass);
+      }
+      // Streak badges are MY OWN achievement only — never awarded based
+      // on the opponent's streak, both because it wouldn't make sense
+      // and because playerStats writes are uid-restricted anyway (see
+      // database.rules.json), so this client could never write a badge
+      // to someone else's account even if it tried.
+      if(roleKey === state.myRole && state.googleUser){
+        const badgeId = checkStreakBadge(newStreak, state.myBadges);
+        if(badgeId) awardAndCelebrateBadges([badgeId]);
+      }
+    });
+  }
 
   // A fresh game — either the very first one, or a rematch restarting a
   // finished room — must not carry over the previous game's last "Correct!
@@ -1076,6 +2211,7 @@ function handleOnlineTileClick(tileId){
     const newCellIndex = state.cellIndex + 1;
     updates[`players/${myKey}/score`] = player.score + 1;
     updates[`players/${myKey}/correctCount`] = (state.room.players[myKey].correctCount || 0) + 1;
+    updates[`players/${myKey}/streak`] = (state.room.players[myKey].streak || 0) + 1;
     updates.pool = newPool;
     updates.cellIndex = newCellIndex;
     updates.turn = otherKey;
@@ -1104,6 +2240,7 @@ function handleOnlineTileClick(tileId){
 
     updates[`players/${myKey}/score`] = player.score - 1;
     updates[`players/${myKey}/wrongCount`] = (state.room.players[myKey].wrongCount || 0) + 1;
+    updates[`players/${myKey}/streak`] = 0;
     updates.missLog = [
       ...(state.room.missLog || []),
       {
@@ -1223,6 +2360,7 @@ function handleTimeOut(playerIndex){
   el.rematchBtn.disabled = false;
 
   const timedOutPlayer = state.players[playerIndex];
+  recordMyStats(state.mode, state.players[0].correctCount, state.players[0].wrongCount, state.timeControlSeconds > 0);
 
   if(state.mode === 'solo'){
     el.winnerHeading.textContent = "Time's up!";
@@ -1386,13 +2524,14 @@ function rematchLocal(){
     p.score = 0;
     p.correctCount = 0;
     p.wrongCount = 0;
+    p.streak = 0;
     p.timeRemaining = state.timeControlSeconds;
   });
   updateScoreChips();
 
   const timerOn = state.timeControlSeconds > 0;
   el.chipP1Timer.classList.toggle('hidden', !timerOn);
-  el.chipP2Timer.classList.toggle('hidden', !timerOn || state.mode !== 'vs');
+  el.chipP2Timer.classList.toggle('hidden', !timerOn || !(state.mode === 'vs' || state.mode === 'computer'));
 
   el.gameScreen.classList.remove('hidden');
   playSound('start');
@@ -1413,20 +2552,47 @@ function handleRematchClick(){
 }
 
 /* =========================================================
-   Teacher spectator view — watch list + PIN gate
+   Teacher spectator view — watch list + Google sign-in gate
 
    Only Online games are watchable (Solo/Same Device never touch
    Firebase, so there's nothing shared to watch). This whole section
    never calls submitRoomUpdate — a spectator's tab must never be able
    to mutate a room, only read it via listenToRoom/listenToAllRooms.
-   ========================================================= */
 
-function submitTeacherPin(){
-  if(el.teacherPinInput.value.trim() === TEACHER_PIN){
+   Access check: after Google sign-in, we only look at the email
+   domain (see teacherConfig.js) — same client-side-only posture as
+   the PIN this replaced (see that file's comment for why). A denied
+   account gets signed straight back out, so a rejected Google session
+   never lingers as this tab's active identity. */
+
+async function handleTeacherGoogleSignIn(){
+  el.teacherPinError.textContent = '';
+  el.teacherPinSubmitBtn.disabled = true;
+  el.teacherPinSubmitBtn.textContent = 'Signing in\u2026';
+
+  let user;
+  try{
+    user = await signInWithGoogle();
+  } catch(err){
+    el.teacherPinSubmitBtn.disabled = false;
+    el.teacherPinSubmitBtn.textContent = 'Sign in with Google';
+    if(err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request'){
+      el.teacherPinError.textContent = 'Sign-in failed. Please try again.';
+    }
+    return;
+  }
+
+  const email = (user.email || '').toLowerCase();
+  const allowed = email.endsWith('@' + TEACHER_EMAIL_DOMAIN);
+
+  if(allowed){
     el.teacherPinModal.classList.add('hidden');
     openWatchList();
   } else {
-    el.teacherPinError.textContent = 'Incorrect PIN.';
+    signOutUser().catch(() => { /* best-effort */ });
+    el.teacherPinError.textContent = `Only @${TEACHER_EMAIL_DOMAIN} accounts can access Watch Games.`;
+    el.teacherPinSubmitBtn.disabled = false;
+    el.teacherPinSubmitBtn.textContent = 'Sign in with Google';
   }
 }
 
@@ -1555,16 +2721,28 @@ function renderSpectatorRoom(room){
   const guestP = room.players.guest;
   state.players = guestP
     ? [
-        { name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount },
-        { name: guestP.name, score: guestP.score, correctCount: guestP.correctCount, wrongCount: guestP.wrongCount },
+        { name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount, streak: hostP.streak || 0 },
+        { name: guestP.name, score: guestP.score, correctCount: guestP.correctCount, wrongCount: guestP.wrongCount, streak: guestP.streak || 0 },
       ]
-    : [{ name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount }];
+    : [{ name: hostP.name, score: hostP.score, correctCount: hostP.correctCount, wrongCount: hostP.wrongCount, streak: hostP.streak || 0 }];
   state.currentPlayer = room.turn === 'host' ? 0 : 1;
 
   const prevGuestPresent = !!prevRoom?.players?.guest;
   if(!prevGuestPresent && guestP) playSound('start');
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
+  if(prevRoom && guestP){
+    ['host', 'guest'].forEach((roleKey) => {
+      const prevStreak = prevRoom.players?.[roleKey]?.streak || 0;
+      const newStreak = room.players?.[roleKey]?.streak || 0;
+      if(newStreak > prevStreak && isStreakMilestone(newStreak)){
+        const roleName = roleKey === 'host' ? hostP.name : guestP.name;
+        const tier = streakTierFor(newStreak);
+        playSound(tier.sound);
+        showStreakPopup(streakPopupText(roleName, newStreak, true), tier.cssClass);
+      }
+    });
+  }
 
   const hostConnected = room.presence?.host ? room.presence.host.connected !== false : true;
   const guestConnected = room.presence?.guest ? room.presence.guest.connected !== false : true;
@@ -1685,6 +2863,14 @@ function startNextPair(){
   renderProblem();
   renderPool();
   updateScoreChips();
+  // Turn order carries over between pairs (it isn't reset to player 0 for
+  // each new pair) — so if the computer's turn carried into this new
+  // pair, it needs its move scheduled here too. handleTileClick() covers
+  // every OTHER turn transition, but the one that completes a pair
+  // returns early (see the isCorrect branch below) before reaching the
+  // scheduling call at its own end, so this is the one transition it
+  // can't cover by itself.
+  maybeScheduleComputerTurn();
 }
 
 const fracHTML = (num, den) => `
@@ -1759,6 +2945,12 @@ function renderPool(){
   el.poolTray.innerHTML = '';
   const myIdx = state.myRole === 'host' ? 0 : 1;
   const myTurn = !state.isOnline || state.currentPlayer === myIdx;
+  // Local modes don't normally enforce turn order in the UI (Same Device
+  // trusts the two humans sharing one device to take turns themselves) —
+  // but "vs Computer" has no second human to self-police that, so the
+  // human's tiles must actually be disabled while it's the computer's turn,
+  // or they could just answer every cell before the computer ever gets a turn.
+  const isComputersTurn = state.mode === 'computer' && state.currentPlayer !== 0;
 
   state.pool.forEach(tile => {
     const btn = document.createElement('button');
@@ -1769,7 +2961,7 @@ function renderPool(){
       // Read-only: no listener at all, not just a disabled attribute.
       btn.disabled = true;
     } else {
-      if(state.isOnline && !myTurn) btn.disabled = true;
+      if((state.isOnline && !myTurn) || isComputersTurn) btn.disabled = true;
       btn.addEventListener('click', () => {
         if(state.isOnline) handleOnlineTileClick(tile.id);
         else handleTileClick(tile.id);
@@ -1788,6 +2980,21 @@ function renderPool(){
 function removeTileFromDOM(tileId){
   const btn = el.poolTray.querySelector(`.tile-btn[data-tile-id="${tileId}"]`);
   if(btn) btn.remove();
+}
+
+/* Individual clicks update the pool tray incrementally (remove just the
+   one used tile, or leave it in place for a wrong answer) rather than
+   calling renderPool() again — that's deliberate, to avoid a freshly
+   rebuilt button landing under the same finger/cursor and registering a
+   second accidental click. But that means the per-turn tile-locking
+   "vs Computer" needs (see renderPool()'s isComputersTurn) has to be
+   kept in sync separately, by toggling .disabled on the buttons that are
+   already there, whenever the turn changes without a full re-render. */
+function syncPoolLockState(){
+  const isComputersTurn = state.mode === 'computer' && state.currentPlayer !== 0;
+  el.poolTray.querySelectorAll('.tile-btn').forEach(btn => {
+    btn.disabled = isComputersTurn;
+  });
 }
 
 /* Purely cosmetic: spawns a floating clone of the tapped tile and arcs it
@@ -1835,6 +3042,212 @@ function animateTileThrow(tileEl, targetEl, variant){
   anim.onfinish = () => clone.remove();
 }
 
+/* =========================================================
+   Streaks — a popup + chime whenever a player lands several correct
+   answers in a row, every 5 (5, 10, 15, 20…). Resets to 0 the moment
+   that player misses. Tracked per-player so it stays meaningful across
+   Solo, Same Device, vs Computer, and Online alike — in the turn-based
+   modes a "streak" is about that player's own run across their turns,
+   not back-to-back taps.
+
+   Each milestone escalates through 4 color/chime tiers (5→bronze,
+   10→silver, 15→gold, 20→prism), then cycles back through the same 4
+   tiers for longer streaks — the popup text still shows the real
+   count, so a 25-streak reads as "25 Streak!" even though it reuses
+   tier 1's color/chime.
+   ========================================================= */
+
+const STREAK_TIERS = [
+  { sound: 'streak', cssClass: 'streak-tier-1' },   // 5, 25, 45…
+  { sound: 'streak2', cssClass: 'streak-tier-2' },  // 10, 30, 50…
+  { sound: 'streak3', cssClass: 'streak-tier-3' },  // 15, 35, 55…
+  { sound: 'streak4', cssClass: 'streak-tier-4' },  // 20, 40, 60…
+];
+
+function isStreakMilestone(count){
+  return count > 0 && count % 5 === 0;
+}
+
+function streakTierFor(count){
+  const tierIndex = (Math.floor(count / 5) - 1) % STREAK_TIERS.length;
+  return STREAK_TIERS[tierIndex];
+}
+
+function streakPopupText(playerName, count, showName){
+  return showName ? `\u{1F525} ${playerName} \u2014 ${count} Streak!` : `\u{1F525} ${count} Streak!`;
+}
+
+function showStreakPopup(text, cssClass){
+  el.streakPopup.textContent = text;
+  el.streakPopup.classList.remove('hidden', 'streak-pop-in', ...STREAK_TIERS.map(t => t.cssClass));
+  el.streakPopup.classList.add(cssClass);
+  void el.streakPopup.offsetWidth; // force reflow so re-adding the class restarts the CSS animation
+  el.streakPopup.classList.add('streak-pop-in');
+}
+
+el.streakPopup.addEventListener('animationend', () => {
+  el.streakPopup.classList.add('hidden');
+  el.streakPopup.classList.remove('streak-pop-in');
+});
+
+/* =========================================================
+   Achievement badges — see badges.js for the definitions and pure
+   eligibility logic. This section owns: loading the signed-in
+   player's earned set, rendering the small icon row on both profile
+   chips, the celebration popup (queued — see below), and actually
+   persisting a newly-earned badge via awardBadge().
+   ========================================================= */
+
+/* Fetches the signed-in player's earned badges into state.myBadges and
+   refreshes the My Badges section if it's currently visible.
+   Fire-and-forget from callers (not awaited) — badges are a nice-to-
+   have overlay on top of stats that already loaded some other way; a
+   failed/slow fetch here shouldn't block anything else. */
+async function loadMyBadges(){
+  if(!state.googleUser) return;
+  try{
+    const stats = await getPlayerStats(state.googleUser.uid);
+    state.myBadges = new Set(Object.keys(stats.badges || {}));
+  } catch(err){
+    console.error('Failed to load badges:', err);
+    state.myBadges = new Set();
+  }
+  if(!el.myStatsModal.classList.contains('hidden')){
+    renderMyStatsBadges();
+  }
+}
+
+/* Renders the "My Badges" section inside My Stats: the icon grid plus
+   the "no badges yet" empty-state message, kept in sync with each
+   other in one place rather than at every call site. */
+function renderMyStatsBadges(){
+  renderBadgeIcons(el.myStatsBadgesGrid, state.myBadges);
+  el.myStatsBadgesEmpty.classList.toggle('hidden', state.myBadges.size > 0);
+}
+
+/* Renders one small emoji per earned badge into `container`. Each
+   icon is a real <button>, not a plain <span>, for two reasons: it
+   keeps the native title="" tooltip for mouse/desktop hover (still
+   works fine there), AND it's tappable — see showBadgeTooltip() below
+   for the mobile-friendly equivalent, since hover tooltips are simply
+   invisible on touch devices. badgeIds can be a Set or a plain array. */
+function renderBadgeIcons(container, badgeIds){
+  if(!container) return;
+  container.innerHTML = '';
+  Array.from(badgeIds).forEach((id) => {
+    const def = BADGE_DEFS_BY_ID[id];
+    if(!def) return; // unknown id (e.g. an older/renamed badge) — skip rather than show a blank icon
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'badge-icon';
+    btn.textContent = def.emoji;
+    btn.title = `${def.name} \u2014 ${def.description}`;
+    btn.setAttribute('aria-label', `${def.name}: ${def.description}`);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't let the document-level dismiss listener below immediately close what we're about to open
+      showBadgeTooltip(def, btn);
+    });
+    container.appendChild(btn);
+  });
+}
+
+/* Tap-to-reveal badge tooltip — the touch-friendly counterpart to the
+   title="" attribute above. Positioned dynamically under (or, if
+   there's no room, above) whichever badge icon was tapped, clamped to
+   stay on-screen horizontally. Auto-dismisses after a few seconds, or
+   immediately on tapping anywhere else. */
+let badgeTooltipTimer = null;
+
+function showBadgeTooltip(def, anchorEl){
+  clearTimeout(badgeTooltipTimer);
+  el.badgeTooltip.textContent = `${def.emoji} ${def.name} \u2014 ${def.description}`;
+  el.badgeTooltip.classList.remove('hidden');
+
+  const anchorRect = anchorEl.getBoundingClientRect();
+  const tipRect = el.badgeTooltip.getBoundingClientRect(); // measurable now that it's unhidden (still opacity:0 until next paint)
+  let left = anchorRect.left + anchorRect.width / 2 - tipRect.width / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+  let top = anchorRect.bottom + 8;
+  if(top + tipRect.height > window.innerHeight - 8){
+    top = anchorRect.top - tipRect.height - 8; // flip above the icon if there's no room below (e.g. a badge near the bottom of the screen)
+  }
+  el.badgeTooltip.style.left = `${left}px`;
+  el.badgeTooltip.style.top = `${top}px`;
+
+  requestAnimationFrame(() => el.badgeTooltip.classList.add('visible'));
+  badgeTooltipTimer = setTimeout(hideBadgeTooltip, 3500);
+}
+
+function hideBadgeTooltip(){
+  clearTimeout(badgeTooltipTimer);
+  el.badgeTooltip.classList.remove('visible');
+  setTimeout(() => el.badgeTooltip.classList.add('hidden'), 200); // let the fade-out transition finish before actually removing it from layout
+}
+
+document.addEventListener('click', (e) => {
+  if(!el.badgeTooltip.classList.contains('hidden') && !el.badgeTooltip.contains(e.target)){
+    hideBadgeTooltip();
+  }
+});
+
+/* Celebration popup — same visual mechanism as the streak popup
+   (force-reflow to restart a CSS animation, animationend to clean up),
+   kept as a separate element/class so a badge unlock reads as a
+   different, rarer kind of moment than a mid-game streak. Popups are
+   queued: awarding several badges at once (e.g. finishing a game that
+   crosses both a persistence and an accuracy milestone) shows them one
+   at a time rather than clobbering each other. */
+let badgePopupQueue = [];
+let badgePopupShowing = false;
+
+function showBadgePopup(badgeDef){
+  badgePopupQueue.push(badgeDef);
+  if(!badgePopupShowing) advanceBadgePopupQueue();
+}
+
+function advanceBadgePopupQueue(){
+  const next = badgePopupQueue.shift();
+  if(!next){
+    badgePopupShowing = false;
+    return;
+  }
+  badgePopupShowing = true;
+  el.badgePopup.textContent = `${next.emoji} Badge earned: ${next.name}!`;
+  el.badgePopup.classList.remove('hidden', 'badge-pop-in');
+  void el.badgePopup.offsetWidth; // force reflow so re-adding the class restarts the CSS animation
+  el.badgePopup.classList.add('badge-pop-in');
+}
+
+el.badgePopup.addEventListener('animationend', () => {
+  el.badgePopup.classList.add('hidden');
+  el.badgePopup.classList.remove('badge-pop-in');
+  advanceBadgePopupQueue(); // show the next queued badge, if any
+});
+
+/* Awards each newly-earned badge (persists it, updates state.myBadges
+   and both profile chips) and queues its celebration popup + sound.
+   Callers pass ids already filtered through badges.js's checkers, so
+   everything here is assumed genuinely new. */
+async function awardAndCelebrateBadges(newBadgeIds){
+  if(!state.googleUser || newBadgeIds.length === 0) return;
+  for(const id of newBadgeIds){
+    state.myBadges.add(id); // update locally right away so a rapid double-check (e.g. two games finishing close together) can't re-award the same id
+    try{
+      await awardBadge(state.googleUser.uid, id);
+    } catch(err){
+      console.error(`Failed to award badge ${id}:`, err);
+    }
+    const def = BADGE_DEFS_BY_ID[id];
+    if(def){
+      playSound('winner'); // reuse the existing triumphant sound rather than add a dedicated asset
+      showBadgePopup(def);
+    }
+  }
+  if(!el.myStatsModal.classList.contains('hidden')){
+    renderMyStatsBadges(); // keep an already-open My Badges section in sync too — most badges are earned mid-game though, with My Stats closed, so this mainly matters if someone has it open in another tab
+  }
+}
+
 function updateScoreChips(){
   el.chipP1Score.textContent = state.players[0].score;
   if(state.players[1]) el.chipP2Score.textContent = state.players[1].score;
@@ -1855,8 +3268,12 @@ function updateTurnFlag(){
     }
     return;
   }
-  if(state.mode === 'vs'){
-    el.turnFlag.textContent = `${state.players[state.currentPlayer].name}'s turn`;
+  if(state.mode === 'vs' || state.mode === 'computer'){
+    if(state.mode === 'computer' && state.currentPlayer === 1){
+      el.turnFlag.textContent = 'Computer is thinking\u2026';
+    } else {
+      el.turnFlag.textContent = `${state.players[state.currentPlayer].name}'s turn`;
+    }
   } else {
     el.turnFlag.textContent = '';
   }
@@ -1886,6 +3303,7 @@ function handleTileClick(tileId){
     animateTileThrow(tileEl, slotEls[0], 'correct');
     player.score += 1;
     player.correctCount += 1;
+    player.streak = (player.streak || 0) + 1;
     state.pool.splice(tileIdx, 1); // consume the tile
     removeTileFromDOM(tile.id);
     slotEls.forEach(slotEl => {
@@ -1897,20 +3315,36 @@ function handleTileClick(tileId){
     el.feedbackLine.textContent = `Correct! ${player.name} +1`;
     el.feedbackLine.className = 'feedback-line good';
 
+    if(isStreakMilestone(player.streak)){
+      const tier = streakTierFor(player.streak);
+      playSound(tier.sound);
+      showStreakPopup(streakPopupText(player.name, player.streak, state.mode !== 'solo'), tier.cssClass);
+    }
+    // Streak badges only ever apply to the signed-in local player, who
+    // is always players[0] by this app's convention (matches
+    // recordMyStats's own assumption) — never the Same-Device human
+    // opponent or the computer, neither of which has an account to
+    // attach a badge to.
+    if(state.currentPlayer === 0 && state.googleUser){
+      const badgeId = checkStreakBadge(player.streak, state.myBadges);
+      if(badgeId) awardAndCelebrateBadges([badgeId]);
+    }
+
     state.cellIndex++;
-    if(state.mode === 'vs') advanceTurn();
+    if(state.mode === 'vs' || state.mode === 'computer') advanceTurn();
 
     if(state.cellIndex >= state.cells.length){
       setTimeout(finishPair, 700); // startNextPair()/showWinner() will unlock
       return;
     }
-    setTimeout(() => { renderProblem(); state.inputLocked = false; }, 250);
+    setTimeout(() => { renderProblem(); state.inputLocked = false; syncPoolLockState(); }, 250);
 
   } else {
     playSound('wrong');
     animateTileThrow(tileEl, slotEls[0], 'wrong');
     player.score -= 1;
     player.wrongCount += 1;
+    player.streak = 0;
     state.missLog.push({
       pairIndex: state.pairIndex,
       problem: { ...state.problem },
@@ -1932,16 +3366,70 @@ function handleTileClick(tileId){
     el.feedbackLine.textContent = `Not quite. ${player.name} -1`;
     el.feedbackLine.className = 'feedback-line bad';
 
-    if(state.mode === 'vs') advanceTurn();
+    if(state.mode === 'vs' || state.mode === 'computer') advanceTurn();
     state.inputLocked = false;
+    syncPoolLockState();
   }
 
   updateScoreChips();
   updateTurnFlag();
+  maybeScheduleComputerTurn();
 }
 
 function advanceTurn(){
   state.currentPlayer = state.currentPlayer === 0 ? 1 : 0;
+}
+
+/* =========================================================
+   Computer opponent ("vs Computer" mode) — the human is always player
+   index 0, the computer always index 1. Rather than a separate game
+   engine, the computer just takes its turn through the EXACT same
+   handleTileClick() a human click would use — same scoring, same
+   missLog, same advanceTurn(), same everything. All that's new here is
+   deciding WHICH tile to click and WHEN.
+
+   Scheduled from the end of handleTileClick() every time (not just when
+   the turn flips to the computer) — takeComputerTurn() re-checks the
+   live state.mode/state.currentPlayer/state.inputLocked itself, so a
+   stale timer from three moves ago just silently no-ops instead of
+   causing a double-move; nothing here assumes the game state hasn't
+   moved on by the time the delay elapses. */
+
+const COMPUTER_DIFFICULTY = {
+  easy:   { errorChance: 0.35, minDelayMs: 2200, maxDelayMs: 4200 },
+  medium: { errorChance: 0.18, minDelayMs: 1400, maxDelayMs: 2800 },
+  hard:   { errorChance: 0.05, minDelayMs: 700,  maxDelayMs: 1600 },
+};
+
+function maybeScheduleComputerTurn(){
+  if(state.mode !== 'computer' || state.currentPlayer !== 1) return;
+  const { minDelayMs, maxDelayMs } = COMPUTER_DIFFICULTY[state.difficulty];
+  const delay = minDelayMs + Math.random() * (maxDelayMs - minDelayMs);
+  setTimeout(takeComputerTurn, delay);
+}
+
+function takeComputerTurn(){
+  // Re-validate everything at execution time — a lot can happen during
+  // the "thinking" delay (the game could have ended, a pair could have
+  // turned over, or — in principle — the turn could already be back to
+  // the human via some other path).
+  if(state.mode !== 'computer' || state.currentPlayer !== 1) return;
+  if(state.inputLocked) return;
+  if(el.gameScreen.classList.contains('hidden')) return;
+  if(state.pool.length === 0) return;
+
+  const activeCell = state.cells[state.cellIndex];
+  const correctTile = state.pool.find(t => t.value === activeCell.correct);
+  const wrongTiles = state.pool.filter(t => t.value !== activeCell.correct);
+
+  const { errorChance } = COMPUTER_DIFFICULTY[state.difficulty];
+  let chosenTile = correctTile;
+  if(wrongTiles.length > 0 && Math.random() < errorChance){
+    chosenTile = wrongTiles[Math.floor(Math.random() * wrongTiles.length)];
+  }
+  if(!chosenTile) chosenTile = state.pool[0]; // defensive fallback, shouldn't happen
+
+  handleTileClick(chosenTile.id);
 }
 
 function finishPair(){
@@ -2002,6 +3490,7 @@ function renderMissedReview(){
 
 function showWinner(){
   stopTimer();
+  recordMyStats(state.mode, state.players[0].correctCount, state.players[0].wrongCount, state.timeControlSeconds > 0);
   el.gameScreen.classList.add('hidden');
   el.winnerModal.classList.remove('hidden');
   el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);

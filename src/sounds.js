@@ -10,6 +10,10 @@ import correctUrl from './assets/sounds/correct.mp3';
 import wrongUrl from './assets/sounds/wrong.mp3';
 import nextUrl from './assets/sounds/next.mp3';
 import winnerUrl from './assets/sounds/winner.mp3';
+import streakUrl from './assets/sounds/streak.wav';
+import streak2Url from './assets/sounds/streak2.wav';
+import streak3Url from './assets/sounds/streak3.wav';
+import streak4Url from './assets/sounds/streak4.wav';
 
 const DEFAULT_VOLUME = 0.7;
 
@@ -19,6 +23,10 @@ const sources = {
   wrong: wrongUrl,
   next: nextUrl,
   winner: winnerUrl,
+  streak: streakUrl,
+  streak2: streak2Url,
+  streak3: streak3Url,
+  streak4: streak4Url,
 };
 
 // One base <audio> element per sound, preloaded.
@@ -30,7 +38,7 @@ for(const [name, url] of Object.entries(sources)){
   base[name] = audio;
 }
 
-/* Plays a sound by name ('start' | 'correct' | 'wrong' | 'next' | 'winner').
+/* Plays a sound by name ('start' | 'correct' | 'wrong' | 'next' | 'winner' | 'streak' | 'streak2' | 'streak3' | 'streak4').
    Clones the underlying <audio> node each time rather than reusing/
    restarting one instance, so two overlapping plays of the same sound
    (e.g. rapid clicking) don't cut each other off.
