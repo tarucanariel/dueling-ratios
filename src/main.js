@@ -3,7 +3,7 @@ import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
-import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge } from './firebase.js';
+import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound } from './sounds.js';
@@ -48,6 +48,7 @@ const state = {
   googleUser: null, // null | { name, photoURL, email }
   myBadges: new Set(), // badge ids earned by the signed-in account — see badges.js and loadMyBadges()
   myStats: null, // full per-mode stats object for the signed-in account, cached so renderMyStatsBadges() can compute "up next" progress bars without re-threading stats through every call site — see openMyStats()/loadMyBadges()/recordMyStats()
+  myEquippedEffect: 'classic', // which TILE_EFFECTS entry the signed-in account has equipped — see activeTileEffectId()
 
   // "Find Opponent" lobby (browsing waiting rooms instead of typing a code)
   unsubscribeLobby: null,
@@ -201,6 +202,7 @@ const el = {
   myStatsBadgesEmpty: document.getElementById('my-stats-badges-empty'),
   myStatsBadgeProgressSection: document.getElementById('my-stats-badge-progress-section'),
   myStatsBadgeProgressList: document.getElementById('my-stats-badge-progress-list'),
+  myStatsEffectsGrid: document.getElementById('my-stats-effects-grid'),
   myStatsTotalGames: document.getElementById('my-stats-total-games'),
   myStatsTotalAccuracy: document.getElementById('my-stats-total-accuracy'),
   myStatsSoloGames: document.getElementById('my-stats-solo-games'),
@@ -420,6 +422,7 @@ function updatePlayerIdentityUI(){
   } else {
     state.myBadges = new Set();
     state.myStats = null;
+    state.myEquippedEffect = 'classic';
     if(!el.myStatsModal.classList.contains('hidden')){
       renderMyStatsBadges(); // clear an already-open My Stats panel too, in the unlikely event someone signs out while it's open
     }
@@ -554,6 +557,7 @@ async function openMyStats(){
     const stats = await getPlayerStats(state.googleUser.uid);
     state.myBadges = new Set(Object.keys(stats.badges || {}));
     state.myStats = stats;
+    state.myEquippedEffect = stats.equippedEffect;
     await checkAndAwardCatchUpBadges(stats);
     renderMyStatsBadges();
 
@@ -2339,7 +2343,7 @@ function handleOnlineTileClick(tileId){
 
   if(isCorrect){
     playSound('correct');
-    animateTileThrow(tileEl, slotEls[0], 'correct');
+    animateTileThrow(tileEl, slotEls[0], 'correct', true); // this function only ever runs on my own turn — see the "not your turn" early return above
     slotEls.forEach(slotEl => {
       slotEl.textContent = tile.value;
       slotEl.classList.remove('active', 'pending');
@@ -3036,6 +3040,7 @@ function partHTML(part){
 }
 
 function renderProblem(){
+  applyTileEffectTheme();
   renderStackedLayout(state.layout);
 }
 
@@ -3147,7 +3152,121 @@ function syncPoolLockState(){
    it can't reintroduce the double-click timing issue we fixed earlier.
    'correct' arcs in and shrinks into place; 'wrong' arcs partway, then
    bounces back and fades, echoing the box's own reject-shake. */
-function animateTileThrow(tileEl, targetEl, variant){
+/* =========================================================
+   Tile-flight effects — the little "toss" animation played when a
+   fraction number lands in its slot. "Classic Arc" is always
+   available; anything else is a purely cosmetic unlock behind a
+   badge, same "reward practice, not competition" spirit as the badges
+   themselves — equipping a flashier effect never changes gameplay,
+   never gives an edge, just looks nicer. New effects can be added
+   here later by extending this list and adding a matching branch in
+   animateTileThrow() below; nothing else needs to change (the My
+   Stats picker and unlock-checking are both driven off this array).
+
+   Only ever applied to the CORRECT-answer toss (see animateTileThrow's
+   `variant` param), and only on the signed-in local player's own turn
+   (see the `isMyTurn` param, resolved differently per call site since
+   "which player index is me" differs between local modes — always
+   players[0] — and online mode — host=0/guest=1) — a same-device
+   opponent, the computer, or an online opponent's own turn always get
+   Classic Arc regardless of what's equipped, since this is meant as a
+   personal reward, not a shared game skin. The wrong-answer animation
+   always stays as-is too, regardless of what's equipped, since it's a
+   negative-feedback cue, not something to reward. */
+const TILE_EFFECTS = [
+  { id: 'classic',        name: 'Classic Arc',     icon: '\uD83C\uDFF9', unlockBadgeId: null },
+  { id: 'bounce-drop',    name: 'Bounce Drop',     icon: '\uD83C\uDFC0', unlockBadgeId: 'persistence-5' },
+  { id: 'spin-toss',      name: 'Spin Toss',       icon: '\uD83C\uDF00', unlockBadgeId: 'streak-10' },
+  { id: 'warp-zoom',      name: 'Warp Zoom',       icon: '\u26A1', unlockBadgeId: 'sharpshooter' },
+  { id: 'confetti-burst', name: 'Confetti Burst',  icon: '\uD83C\uDF89', unlockBadgeId: 'streak-20' },
+  { id: 'sparkle-trail',  name: 'Sparkle Trail',   icon: '\u2728', unlockBadgeId: 'operations-mastered' },
+];
+const TILE_EFFECTS_BY_ID = Object.fromEntries(TILE_EFFECTS.map((e) => [e.id, e]));
+
+function isTileEffectUnlocked(effectId){
+  const effect = TILE_EFFECTS_BY_ID[effectId];
+  if(!effect) return false;
+  return !effect.unlockBadgeId || state.myBadges.has(effect.unlockBadgeId);
+}
+
+/* The effect actually in play right now — falls back to 'classic' if
+   state.myEquippedEffect somehow points at something not currently
+   unlocked (e.g. a stale cached value from before a badge was lost in
+   some future change, or badge data edited directly in the Firebase
+   console), so a flying tile can never render an effect the signed-in
+   account hasn't actually earned. */
+function activeTileEffectId(){
+  return isTileEffectUnlocked(state.myEquippedEffect) ? state.myEquippedEffect : 'classic';
+}
+
+/* Applies a persistent, ambient board theme (border glow, background
+   shimmer, etc. — all in CSS, see .effect-theme-* rules) matching the
+   equipped tile effect to the whole problem strip + tile pool, not
+   just the split-second toss animation. Called from renderProblem()
+   so it's always re-evaluated on every board render — game start, next
+   pair, computer's turn, review screen — rather than needing to be
+   threaded through every individual call site that starts a game.
+   Classic Arc intentionally gets no theme class at all, staying the
+   plain baseline every other theme is visually compared against. */
+function applyTileEffectTheme(){
+  TILE_EFFECTS.forEach((effect) => el.gameScreen.classList.remove(`effect-theme-${effect.id}`));
+  const effectId = activeTileEffectId();
+  if(effectId !== 'classic') el.gameScreen.classList.add(`effect-theme-${effectId}`);
+}
+
+/* Persists which effect is equipped, with an optimistic local update
+   so the picker feels instant — rolled back if the write fails. */
+async function equipTileEffect(effectId){
+  if(!state.googleUser || !isTileEffectUnlocked(effectId) || effectId === state.myEquippedEffect) return;
+  const previous = state.myEquippedEffect;
+  state.myEquippedEffect = effectId;
+  renderMyStatsEffects();
+  applyTileEffectTheme(); // in case a game is already sitting in progress behind the My Stats modal
+  try{
+    await setEquippedEffect(state.googleUser.uid, effectId);
+  } catch(err){
+    console.error('Failed to save equipped tile effect:', err);
+    state.myEquippedEffect = previous;
+    renderMyStatsEffects();
+    applyTileEffectTheme();
+  }
+}
+
+/* Renders the Tile Effects picker in My Stats as a row of icon
+   buttons — same "tap for a tooltip" pattern as the badge icons above
+   (in fact reusing showBadgeTooltip() directly, since it only ever
+   reads .emoji/.name/.description off whatever's passed in). Unlocked
+   icons also equip on tap; the currently-equipped one gets a
+   highlighted ring; locked ones are dimmed with a small lock badge,
+   still tappable for the tooltip (so a player can see what's coming)
+   but never equippable. */
+function renderMyStatsEffects(){
+  el.myStatsEffectsGrid.innerHTML = '';
+  TILE_EFFECTS.forEach((effect) => {
+    const unlocked = isTileEffectUnlocked(effect.id);
+    const equipped = unlocked && activeTileEffectId() === effect.id;
+    const badgeDef = effect.unlockBadgeId ? BADGE_DEFS_BY_ID[effect.unlockBadgeId] : null;
+    const description = badgeDef ? `Unlocked by ${badgeDef.emoji} ${badgeDef.name}.` : 'Always available.';
+    const tooltipDef = { emoji: effect.icon, name: effect.name, description };
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tile-effect-icon' + (unlocked ? '' : ' locked') + (equipped ? ' equipped' : '');
+    btn.textContent = effect.icon;
+    btn.title = `${effect.name} \u2014 ${description}`;
+    btn.setAttribute('aria-label', unlocked
+      ? `${effect.name}${equipped ? ' (equipped)' : ''}: ${description}`
+      : `${effect.name} (locked): ${description}`);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't let the document-level dismiss listener immediately close what we're about to open
+      showBadgeTooltip(tooltipDef, btn);
+      if(unlocked) equipTileEffect(effect.id);
+    });
+    el.myStatsEffectsGrid.appendChild(btn);
+  });
+}
+
+function animateTileThrow(tileEl, targetEl, variant, isMyTurn){
   if(!tileEl || !targetEl) return;
   const startRect = tileEl.getBoundingClientRect();
   const endRect = targetEl.getBoundingClientRect();
@@ -3166,24 +3285,183 @@ function animateTileThrow(tileEl, targetEl, variant){
   const dx = (endRect.left + endRect.width / 2) - (startRect.left + startRect.width / 2);
   const dy = (endRect.top + endRect.height / 2) - (startRect.top + startRect.height / 2);
 
-  const keyframes = variant === 'wrong'
-    ? [
-        { transform: 'translate(0,0) scale(1)', offset: 0 },
-        { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 30}px) scale(1.05)`, offset: 0.45 },
-        { transform: `translate(${dx * 0.85}px, ${dy * 0.85}px) scale(0.9)`, offset: 0.65 },
-        { transform: `translate(${dx * 0.55}px, ${dy * 0.55 - 12}px) scale(0.7)`, opacity: 0, offset: 1 },
-      ]
-    : [
-        { transform: 'translate(0,0) scale(1)', offset: 0 },
-        { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) scale(1.05)`, offset: 0.5 },
-        { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0.85, offset: 1 },
-      ];
+  // Cosmetic tile effects only ever apply to the signed-in local
+  // player's OWN turn (isMyTurn, passed in by the caller — see its
+  // definition at each call site, since "which player index is me"
+  // differs between local modes, always players[0], and online mode,
+  // host=0/guest=1). A same-device opponent, the computer, or an
+  // online opponent's own turn all fall back to Classic Arc here,
+  // regardless of what's equipped — the whole point is that this is a
+  // personal reward, not something anyone sharing the screen/match
+  // benefits from.
+  const effectId = (variant === 'wrong' || !isMyTurn) ? null : activeTileEffectId();
 
-  const anim = clone.animate(keyframes, {
-    duration: variant === 'wrong' ? 420 : 380,
-    easing: variant === 'wrong' ? 'ease-out' : 'ease-in',
-  });
+  let keyframes, duration, easing;
+  if(variant === 'wrong'){
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', offset: 0 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 30}px) scale(1.05)`, offset: 0.45 },
+      { transform: `translate(${dx * 0.85}px, ${dy * 0.85}px) scale(0.9)`, offset: 0.65 },
+      { transform: `translate(${dx * 0.55}px, ${dy * 0.55 - 12}px) scale(0.7)`, opacity: 0, offset: 1 },
+    ];
+    duration = 420;
+    easing = 'ease-out';
+  } else if(effectId === 'bounce-drop'){
+    // Overshoots past the slot TWICE, each rebound smaller than the
+    // last, with matching squash/stretch on scale — a much more
+    // obvious double "boing" than a single soft rebound.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', offset: 0 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 46}px) scale(1.1)`, offset: 0.35 },
+      { transform: `translate(${dx * 0.97}px, ${dy * 1.3}px) scale(0.42)`, offset: 0.58 },
+      { transform: `translate(${dx}px, ${dy * 0.78}px) scale(0.55)`, offset: 0.72 },
+      { transform: `translate(${dx}px, ${dy * 1.12}px) scale(0.4)`, offset: 0.85 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0.85, offset: 1 },
+    ];
+    duration = 560;
+    easing = 'ease-out';
+  } else if(effectId === 'spin-toss'){
+    // Two full spins (720deg, not one) plus a bigger mid-flight scale
+    // pop — a single 360 read as barely-there against the tile's own
+    // small size, so it needed real amplitude to actually register.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1) rotate(0deg)', offset: 0 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 46}px) scale(1.15) rotate(360deg)`, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.35) rotate(720deg)`, opacity: 0.85, offset: 1 },
+    ];
+    duration = 480;
+    easing = 'ease-in';
+  } else if(effectId === 'warp-zoom'){
+    // Added a brief anticipation dip — a small pull-back opposite the
+    // travel direction with a "wind-up" glow — before dashing forward,
+    // overshooting bigger than before, and vanishing. The glow (via
+    // filter, animatable same as transform/opacity) ramps up through
+    // the dash and cuts at the very end, giving it its own visual
+    // signature beyond just motion shape.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', filter: 'brightness(1) drop-shadow(0 0 0px #00e5ff)', opacity: 1, offset: 0 },
+      { transform: `translate(${-dx * 0.06}px, ${-dy * 0.06}px) scale(1.12)`, filter: 'brightness(1.3) drop-shadow(0 0 6px #00e5ff)', opacity: 1, offset: 0.18 },
+      { transform: `translate(${dx * 0.8}px, ${dy * 0.8}px) scale(0.85)`, filter: 'brightness(1.8) drop-shadow(0 0 16px #00e5ff)', opacity: 1, offset: 0.55 },
+      { transform: `translate(${dx * 0.98}px, ${dy * 0.98}px) scale(1.4)`, filter: 'brightness(2) drop-shadow(0 0 22px #00e5ff)', opacity: 1, offset: 0.75 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.05)`, filter: 'brightness(2) drop-shadow(0 0 0px #00e5ff)', opacity: 0, offset: 1 },
+    ];
+    duration = 340;
+    easing = 'linear';
+  } else if(effectId === 'confetti-burst'){
+    // Its own landing beat rather than borrowing Classic's — overshoots
+    // more dramatically right before settling, timed so that visible
+    // "pop" lands in the exact same instant the confetti spawns below,
+    // reading as one bigger combined beat.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', offset: 0 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) scale(1.1)`, offset: 0.48 },
+      { transform: `translate(${dx * 0.97}px, ${dy * 0.97}px) scale(0.55)`, offset: 0.82 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0.85, offset: 1 },
+    ];
+    duration = 400;
+    easing = 'ease-in';
+  } else if(effectId === 'sparkle-trail'){
+    // The tile itself now glows throughout the flight (via filter,
+    // same technique as Warp Zoom above) rather than relying solely on
+    // the small trailing dots below — the whole path reads as
+    // luminous, not just a few sparkles someone might miss.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', filter: 'drop-shadow(0 0 0px #fff59d)', offset: 0 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) scale(1.1)`, filter: 'drop-shadow(0 0 14px #fff59d)', offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, filter: 'drop-shadow(0 0 4px #fff59d)', opacity: 0.85, offset: 1 },
+    ];
+    duration = 420;
+    easing = 'ease-in';
+  } else { // 'classic' (also the fallback for any unrecognized effect id)
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', offset: 0 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) scale(1.05)`, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0.85, offset: 1 },
+    ];
+    duration = 380;
+    easing = 'ease-in';
+  }
+
+  const anim = clone.animate(keyframes, { duration, easing });
   anim.onfinish = () => clone.remove();
+
+  // The two "extra flourish" effects layer a signature visual on top
+  // of their own flight above: confetti bursts right as it lands,
+  // sparkles trail along the same path while it's still moving.
+  if(effectId === 'confetti-burst'){
+    const landX = endRect.left + endRect.width / 2;
+    const landY = endRect.top + endRect.height / 2;
+    anim.onfinish = () => { clone.remove(); spawnConfettiBurst(landX, landY); };
+  } else if(effectId === 'sparkle-trail'){
+    const startX = startRect.left + startRect.width / 2;
+    const startY = startRect.top + startRect.height / 2;
+    spawnSparkleTrail(startX, startY, dx, dy, duration);
+  }
+}
+
+/* Confetti Burst's landing flourish — a handful of small colored
+   pieces scatter outward and fall/fade from the point where the tile
+   just landed. Angles are spread evenly around a circle with a touch
+   of randomness so it reads as a natural burst rather than a uniform
+   starburst; each piece animates and removes itself independently. */
+function spawnConfettiBurst(x, y){
+  const colors = ['#00d2ff', '#8a2be2', '#00ff88', '#ff3366', '#ffd700'];
+  const count = 16; // was 10 — a denser burst reads as a much bigger moment
+  for(let i = 0; i < count; i++){
+    const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
+    const distance = 36 + Math.random() * 30; // was 26 + rand*22 — bigger scatter radius
+    const px = Math.cos(angle) * distance;
+    const py = Math.sin(angle) * distance + 22; // a little extra downward drift, like gravity catching it
+    const spin = (Math.random() > 0.5 ? 1 : -1) * (180 + Math.random() * 180);
+
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    piece.style.left = `${x}px`;
+    piece.style.top = `${y}px`;
+    piece.style.background = colors[i % colors.length];
+    document.body.appendChild(piece);
+
+    const anim = piece.animate([
+      { transform: 'translate(-50%,-50%) translate(0,0) scale(1.4) rotate(0deg)', opacity: 1, offset: 0 },
+      { transform: `translate(-50%,-50%) translate(${px}px, ${py}px) scale(0.6) rotate(${spin}deg)`, opacity: 0, offset: 1 },
+    ], { duration: 520 + Math.random() * 160, easing: 'ease-out' });
+    anim.onfinish = () => piece.remove();
+  }
+}
+
+/* Sparkle Trail's signature flourish — a few small glints spawned
+   along the SAME quadratic-arc path the main tile clone flies (see
+   the classic keyframes above: start at (0,0), curve through the
+   midpoint peak, end at (dx,dy)), timed via setTimeout so they appear
+   progressively as the real tile passes through each point rather
+   than all at once. */
+function spawnSparkleTrail(startX, startY, dx, dy, totalDuration){
+  const arcPoint = (t) => {
+    const p1x = dx * 0.5, p1y = dy * 0.5 - 40; // same midpoint used in the classic-arc keyframes above
+    const mt = 1 - t;
+    return {
+      x: mt * mt * 0 + 2 * mt * t * p1x + t * t * dx,
+      y: mt * mt * 0 + 2 * mt * t * p1y + t * t * dy,
+    };
+  };
+  const sparkleChars = ['\u2726', '\u2727', '\u2728']; // \u2726/\u2727 (four/six-point stars) mixed with \u2728 (sparkles emoji) for a bit of variety instead of one repeated glyph
+  [0.1, 0.22, 0.35, 0.48, 0.6, 0.72, 0.85].forEach((t, i) => { // was 5 sparser points — denser trail reads as continuously glowing rather than a few blinks
+    setTimeout(() => {
+      const pos = arcPoint(t);
+      const dot = document.createElement('div');
+      dot.className = 'sparkle-dot';
+      dot.textContent = sparkleChars[i % sparkleChars.length];
+      dot.style.left = `${startX + pos.x}px`;
+      dot.style.top = `${startY + pos.y}px`;
+      document.body.appendChild(dot);
+      const anim = dot.animate([
+        { transform: 'translate(-50%,-50%) scale(0.4)', opacity: 1, offset: 0 },
+        { transform: 'translate(-50%,-50%) scale(1.5)', opacity: 1, offset: 0.3 }, // was 1.1 — bigger peak so each glint is clearly visible, not just a speck
+        { transform: 'translate(-50%,-50%) scale(0.3)', opacity: 0, offset: 1 },
+      ], { duration: 420, easing: 'ease-out' });
+      anim.onfinish = () => dot.remove();
+    }, t * totalDuration);
+  });
 }
 
 /* =========================================================
@@ -3253,11 +3531,13 @@ async function loadMyBadges(){
     const stats = await getPlayerStats(state.googleUser.uid);
     state.myBadges = new Set(Object.keys(stats.badges || {}));
     state.myStats = stats;
+    state.myEquippedEffect = stats.equippedEffect;
     await checkAndAwardCatchUpBadges(stats);
   } catch(err){
     console.error('Failed to load badges:', err);
     state.myBadges = new Set();
     state.myStats = null;
+    state.myEquippedEffect = 'classic';
   }
   if(!el.myStatsModal.classList.contains('hidden')){
     renderMyStatsBadges();
@@ -3271,6 +3551,7 @@ function renderMyStatsBadges(){
   renderBadgeIcons(el.myStatsBadgesGrid, state.myBadges);
   el.myStatsBadgesEmpty.classList.toggle('hidden', state.myBadges.size > 0);
   renderNextBadgeProgress();
+  renderMyStatsEffects();
 }
 
 /* Renders the "Up Next" progress bars — one per not-yet-earned badge
@@ -3487,7 +3768,7 @@ function handleTileClick(tileId){
 
   if(isCorrect){
     playSound('correct');
-    animateTileThrow(tileEl, slotEls[0], 'correct');
+    animateTileThrow(tileEl, slotEls[0], 'correct', state.currentPlayer === 0);
     player.score += 1;
     player.correctCount += 1;
     player.streak = (player.streak || 0) + 1;

@@ -219,10 +219,10 @@
       <p>One player creates a game and receives a short room code; the other player enters that code to join. Once both players are in, the game begins automatically for both of you at the same time.</p>
 
       <h3>Signing In with Google (optional)</h3>
-      <p>Typing a name is always enough to play — signing in with Google is entirely optional, and only unlocks two extra things: your stats following your account across every device instead of just one browser, and the ability to join a class. Look for the "Sign in with Google" option next to the name field on the setup screen.</p>
+      <p>Typing a name is always enough to play — signing in with Google is entirely optional, and only unlocks a few extra things: your stats following your account across every device instead of just one browser, the ability to join or create a class, and cosmetic Tile Effects you can unlock and equip. Look for the "Sign in with Google" option next to the name field on the setup screen.</p>
 
       <h3>My Stats</h3>
-      <p>Available once you're signed in with Google. Shows how many games you've played and your accuracy, broken out separately for Solo, Same Device, vs Computer, and Online, plus a combined "All Modes" total — and, in its own "My Badges" section, every achievement badge you've earned so far. Tap a badge (or hover it on a computer) to see its name and description.</p>
+      <p>Available once you're signed in with Google. Shows how many games you've played and your accuracy, broken out separately for Solo, Same Device, vs Computer, and Online, plus a combined "All Modes" total. Its "My Badges" section shows every achievement badge you've earned so far (tap a badge, or hover it on a computer, to see its name and description) plus an "Up Next" progress bar toward whichever badge you're closest to earning in each badge family. Right below that, "Tile Effects" is where you equip whichever correct-answer animation you'd like to use — see below.</p>
 
       <h3>Achievement Badges</h3>
       <p>Signed-in players can permanently unlock badges by hitting certain milestones. Earning one pops up its own gold celebration banner the moment it happens, in addition to showing up in My Stats afterward. Current badges:</p>
@@ -238,10 +238,27 @@
         <li><strong>⏱️ Beat the Clock</strong> — Finish a game (Local or Online) with a time control turned on.</li>
         <li><strong>🧮 Math Machine</strong> — Answer 1,000 questions correctly, lifetime.</li>
         <li><strong>🎓 Math Whiz</strong> — 98%+ accuracy over at least 200 total answers.</li>
+        <li><strong>➕ Addition Ace</strong> — 90%+ accuracy over at least 50 addition answers, lifetime.</li>
+        <li><strong>➖ Subtraction Star</strong> — 90%+ accuracy over at least 50 subtraction answers, lifetime.</li>
+        <li><strong>✖️ Multiplication Master</strong> — 90%+ accuracy over at least 50 multiplication answers, lifetime.</li>
+        <li><strong>➗ Division Dynamo</strong> — 90%+ accuracy over at least 50 division answers, lifetime.</li>
+        <li><strong>🧠 Fraction Champion</strong> — Earn all four operation-mastery badges above.</li>
       </ul>
 
-      <h3>My Class</h3>
-      <p>Also inside My Stats, once signed in. A teacher (signed in with a school account) can create up to 5 classes, each with its own short join code to share — students who join with that code show up in a roster showing each student's games played and accuracy. A teacher can rename a class, remove an individual student from the roster, or delete a class entirely once it's no longer needed, freeing up a slot for a new one. A student can only be in one class at a time; joining a new one replaces the last. If a student's class is ever deleted, or the teacher removes them from it, that's picked up automatically the next time they open My Class.</p>
+      <h3>Tile Effects</h3>
+      <p>Found in My Stats, right below your badges. This is a cosmetic customization for the little animation played whenever you get an answer right — it never affects gameplay or scoring, it's purely for fun. Tap an icon to preview what it does and equip it; the one you have equipped gets a highlighted ring. Locked ones show a small 🔒 and are still tappable to see which badge unlocks them:</p>
+      <ul>
+        <li><strong>🏹 Classic Arc</strong> — the default, always available.</li>
+        <li><strong>🏀 Bounce Drop</strong> — unlocked by 🌱 Getting Started.</li>
+        <li><strong>🌀 Spin Toss</strong> — unlocked by 🔥 On a Roll.</li>
+        <li><strong>⚡ Warp Zoom</strong> — unlocked by 💯 Sharpshooter.</li>
+        <li><strong>🎉 Confetti Burst</strong> — unlocked by ⚡ Unstoppable.</li>
+        <li><strong>✨ Sparkle Trail</strong> — unlocked by 🧠 Fraction Champion, the rarest badge.</li>
+      </ul>
+      <p>Whichever effect you have equipped also gives the board itself a matching ambient look for the rest of the game, not just the toss animation. In Same Device mode, only the account signed in on this device gets the custom effect on their turn — a same-device partner, or the computer in vs Computer mode, always sees the plain Classic Arc.</p>
+
+      <h3>My Classes</h3>
+      <p>Its own chip on the opening screen, once signed in with Google. A teacher (signed in with a school account) can create up to 5 classes, each with its own short join code to share — students who join with that code show up in a roster showing each student's games played and accuracy. A teacher can rename a class (pencil icon), remove an individual student from the roster (person icon, tap again to confirm), or delete a class entirely once it's no longer needed (trash icon), freeing up a slot for a new one. A student can only be in one class at a time; joining a new one replaces the last. If a student's class is ever deleted, or the teacher removes them from it, that's picked up automatically the next time they open My Classes.</p>
 
       <h3>Watch Games</h3>
       <p>Lets a teacher (signed in with a school account) browse and spectate ongoing Online games in real time, without taking part.</p>
@@ -327,6 +344,12 @@
         <div class="hidden" id="my-stats-badge-progress-section">
           <h4 class="my-stats-badge-progress-heading">Up Next</h4>
           <div id="my-stats-badge-progress-list"></div>
+        </div>
+
+        <div id="my-stats-effects-section">
+          <h4 class="my-stats-badge-progress-heading">Tile Effects</h4>
+          <p class="field-note" id="my-stats-effects-note">The animation played when you get an answer right. Tap an icon to preview and equip it — locked ones show which badge unlocks them.</p>
+          <div id="my-stats-effects-grid"></div>
         </div>
       </div>
 

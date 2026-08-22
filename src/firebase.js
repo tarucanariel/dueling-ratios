@@ -215,6 +215,10 @@ export async function getPlayerStats(uid){
   // see badges.js for the id list, and awardBadge() below for how they
   // get set.
   stats.badges = data.badges || {};
+  // Equipped tile-flight effect — purely cosmetic, see TILE_EFFECTS in
+  // main.js. Defaults to 'classic' (always unlocked) so callers never
+  // need to handle "no effect chosen yet" as a separate case.
+  stats.equippedEffect = data.equippedEffect || 'classic';
   return stats;
 }
 
@@ -227,6 +231,15 @@ export async function getPlayerStats(uid){
    write to every path underneath it. */
 export async function awardBadge(uid, badgeId){
   await update(ref(db), { [`playerStats/${uid}/badges/${badgeId}`]: Date.now() });
+}
+
+/* Sets which tile-flight effect is currently equipped. Whether
+   effectId is actually unlocked (i.e. its badge has been earned) is
+   main.js's job to check before calling this — same trust model as
+   everything else client-side here, per the README's existing
+   "no anti-cheat" note. */
+export async function setEquippedEffect(uid, effectId){
+  await update(ref(db), { [`playerStats/${uid}/equippedEffect`]: effectId });
 }
 
 const FEEDBACK_MAX_LENGTH = 2000;
