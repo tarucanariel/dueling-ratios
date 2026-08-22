@@ -4,7 +4,7 @@ import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate,
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
 import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge } from './firebase.js';
-import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge } from './badges.js';
+import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound } from './sounds.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
@@ -46,6 +46,7 @@ const state = {
   // the same signed-in identity) until they explicitly click "Not you?".
   googleUser: null, // null | { name, photoURL, email }
   myBadges: new Set(), // badge ids earned by the signed-in account — see badges.js and loadMyBadges()
+  myStats: null, // full per-mode stats object for the signed-in account, cached so renderMyStatsBadges() can compute "up next" progress bars without re-threading stats through every call site — see openMyStats()/loadMyBadges()/recordMyStats()
 
   // "Find Opponent" lobby (browsing waiting rooms instead of typing a code)
   unsubscribeLobby: null,
@@ -197,6 +198,8 @@ const el = {
   myStatsProfileName: document.getElementById('my-stats-profile-name'),
   myStatsBadgesGrid: document.getElementById('my-stats-badges-grid'),
   myStatsBadgesEmpty: document.getElementById('my-stats-badges-empty'),
+  myStatsBadgeProgressSection: document.getElementById('my-stats-badge-progress-section'),
+  myStatsBadgeProgressList: document.getElementById('my-stats-badge-progress-list'),
   myStatsTotalGames: document.getElementById('my-stats-total-games'),
   myStatsTotalAccuracy: document.getElementById('my-stats-total-accuracy'),
   myStatsSoloGames: document.getElementById('my-stats-solo-games'),
@@ -207,6 +210,15 @@ const el = {
   myStatsVsComputerAccuracy: document.getElementById('my-stats-vscomputer-accuracy'),
   myStatsOnlineGames: document.getElementById('my-stats-online-games'),
   myStatsOnlineAccuracy: document.getElementById('my-stats-online-accuracy'),
+  myClassesBtn: document.getElementById('my-classes-btn'),
+  myClassesModal: document.getElementById('my-classes-modal'),
+  myClassesSignedOut: document.getElementById('my-classes-signed-out'),
+  myClassesSignedIn: document.getElementById('my-classes-signed-in'),
+  myClassesError: document.getElementById('my-classes-error'),
+  myClassesSigninBtn: document.getElementById('my-classes-signin-btn'),
+  myClassesCloseBtn: document.getElementById('my-classes-close-btn'),
+  myClassesProfilePic: document.getElementById('my-classes-profile-pic'),
+  myClassesProfileName: document.getElementById('my-classes-profile-name'),
   myClassHeading: document.getElementById('my-class-heading'),
   classTeacherSection: document.getElementById('class-teacher-section'),
   classNameInput: document.getElementById('class-name-input'),
@@ -358,6 +370,7 @@ async function recordMyStats(mode, correctCount, wrongCount, hadTimeControl){
     await recordGameResult(uid, modeToStatsKey(mode), correctCount || 0, wrongCount || 0);
     const freshStats = await getPlayerStats(uid);
     state.myBadges = new Set(Object.keys(freshStats.badges || {})); // in case another tab/session earned something since our last load
+    state.myStats = freshStats;
     const newlyEarned = checkGameEndBadges(freshStats, state.myBadges, correctCount || 0, wrongCount || 0, !!hadTimeControl);
     await awardAndCelebrateBadges(newlyEarned);
   } catch(err){
@@ -386,8 +399,12 @@ function updatePlayerIdentityUI(){
     loadMyBadges(); // fire-and-forget — see loadMyBadges() below
   } else {
     state.myBadges = new Set();
+    state.myStats = null;
     if(!el.myStatsModal.classList.contains('hidden')){
       renderMyStatsBadges(); // clear an already-open My Stats panel too, in the unlikely event someone signs out while it's open
+    }
+    if(!el.myClassesModal.classList.contains('hidden')){
+      renderMyClassesPanel(); // flip an already-open My Classes modal back to its signed-out state too
     }
   }
 }
@@ -499,6 +516,7 @@ async function openMyStats(){
   try{
     const stats = await getPlayerStats(state.googleUser.uid);
     state.myBadges = new Set(Object.keys(stats.badges || {}));
+    state.myStats = stats;
     renderMyStatsBadges();
 
     const solo = formatStatsRow(stats.solo.gamesPlayed, stats.solo.correctCount, stats.solo.wrongCount);
@@ -517,8 +535,6 @@ async function openMyStats(){
     el.myStatsVsComputerAccuracy.textContent = vsComputer.accuracy;
     el.myStatsOnlineGames.textContent = online.games;
     el.myStatsOnlineAccuracy.textContent = online.accuracy;
-
-    await renderClassSection(stats);
   } catch(err){
     el.myStatsError.textContent = 'Could not load your stats. Please try again.';
     console.error(err);
@@ -526,11 +542,62 @@ async function openMyStats(){
 }
 
 /* =========================================================
-   My Class — lives inside the My Stats panel. Which of the 4 blocks
-   shows depends only on the signed-in account's email domain (the same
-   TEACHER_EMAIL_DOMAIN check the Watch Games gate already uses) and,
-   for players, whether they're currently in a class at all.
+   My Classes — its own modal, opened from the "My Classes" chip on the
+   opening screen (previously this content lived inside My Stats). Which
+   of the sub-blocks shows depends only on the signed-in account's email
+   domain (the same TEACHER_EMAIL_DOMAIN check the Watch Games gate
+   already uses) and, for players, whether they're currently in a class
+   at all.
    ========================================================= */
+
+async function openMyClasses(){
+  el.myClassesError.textContent = '';
+  el.myClassesModal.classList.remove('hidden');
+  renderMyClassesPanel();
+  if(!state.googleUser) return;
+
+  try{
+    const stats = await getPlayerStats(state.googleUser.uid);
+    await renderClassSection(stats);
+  } catch(err){
+    el.myClassesError.textContent = 'Could not load your classes. Please try again.';
+    console.error(err);
+  }
+}
+
+function renderMyClassesPanel(){
+  const signedIn = !!state.googleUser;
+  el.myClassesSignedOut.classList.toggle('hidden', signedIn);
+  el.myClassesSignedIn.classList.toggle('hidden', !signedIn);
+  if(!signedIn) return;
+
+  el.myClassesProfileName.textContent = state.googleUser.name;
+  if(state.googleUser.photoURL){
+    el.myClassesProfilePic.src = state.googleUser.photoURL;
+    el.myClassesProfilePic.classList.remove('hidden');
+  } else {
+    el.myClassesProfilePic.classList.add('hidden');
+  }
+}
+
+async function handleMyClassesSignIn(){
+  el.myClassesError.textContent = '';
+  el.myClassesSigninBtn.disabled = true;
+  let user;
+  try{
+    user = await signInWithGoogle();
+  } catch(err){
+    if(err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request'){
+      el.myClassesError.textContent = 'Google sign-in failed. Please try again.';
+    }
+    return;
+  } finally {
+    el.myClassesSigninBtn.disabled = false;
+  }
+  state.googleUser = toGoogleUserRecord(user);
+  updatePlayerIdentityUI(); // this sign-in doubles as the setup screen's identity too
+  openMyClasses(); // re-render now signed in, and fetch the actual classes
+}
 
 function isTeacherAccount(){
   const email = (state.googleUser?.email || '').toLowerCase();
@@ -638,6 +705,15 @@ async function renderClassList(classes){
   await renderClassCard(selectedClass);
 }
 
+/* Small stroke-style icons for the class-card action buttons (rename,
+   delete, remove student) — icon-only with a title/aria-label carrying
+   the meaning, rather than visible text labels. currentColor so they
+   inherit the button's own color/hover states from CSS. */
+const ICON_PENCIL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`;
+const ICON_TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`;
+const ICON_USER_MINUS = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="23" y1="11" x2="17" y2="11"></line></svg>`;
+const ICON_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
 async function renderClassCard(cls){
   const card = document.createElement('div');
   card.className = 'class-card';
@@ -652,13 +728,15 @@ async function renderClassCard(cls){
   nameSpan.textContent = cls.name || 'Untitled Class';
   const renameBtn = document.createElement('button');
   renameBtn.type = 'button';
-  renameBtn.className = 'class-rename-btn';
-  renameBtn.textContent = 'Rename';
+  renameBtn.className = 'class-icon-btn class-rename-btn';
+  renameBtn.innerHTML = ICON_PENCIL;
+  renameBtn.title = 'Rename';
   renameBtn.setAttribute('aria-label', `Rename ${cls.name || 'Untitled Class'}`);
   const deleteBtn = document.createElement('button');
   deleteBtn.type = 'button';
-  deleteBtn.className = 'class-rename-btn class-delete-btn';
-  deleteBtn.textContent = 'Delete';
+  deleteBtn.className = 'class-icon-btn class-rename-btn class-delete-btn';
+  deleteBtn.innerHTML = ICON_TRASH;
+  deleteBtn.title = 'Delete';
   deleteBtn.setAttribute('aria-label', `Delete ${cls.name || 'Untitled Class'}`);
   nameWrap.append(nameSpan, renameBtn, deleteBtn);
 
@@ -819,8 +897,9 @@ async function renderClassCard(cls){
       removeTd.className = 'class-roster-remove-cell';
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
-      removeBtn.className = 'text-link-btn class-roster-remove-btn';
-      removeBtn.textContent = 'Remove';
+      removeBtn.className = 'class-icon-btn class-roster-remove-btn';
+      removeBtn.innerHTML = ICON_USER_MINUS;
+      removeBtn.title = 'Remove';
       removeBtn.setAttribute('aria-label', `Remove ${row.name} from ${cls.name || 'this class'}`);
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
@@ -829,7 +908,9 @@ async function renderClassCard(cls){
       let confirming = false;
       function resetRemoveBtn(){
         confirming = false;
-        removeBtn.textContent = 'Remove';
+        removeBtn.innerHTML = ICON_USER_MINUS;
+        removeBtn.title = 'Remove';
+        removeBtn.setAttribute('aria-label', `Remove ${row.name} from ${cls.name || 'this class'}`);
         removeBtn.classList.remove('class-delete-btn');
         removeBtn.disabled = false;
         cancelBtn.classList.add('hidden');
@@ -837,7 +918,9 @@ async function renderClassCard(cls){
       removeBtn.addEventListener('click', async () => {
         if(!confirming){
           confirming = true;
-          removeBtn.textContent = 'Confirm?';
+          removeBtn.innerHTML = ICON_CHECK;
+          removeBtn.title = 'Confirm removal';
+          removeBtn.setAttribute('aria-label', `Confirm removing ${row.name} from ${cls.name || 'this class'}`);
           removeBtn.classList.add('class-delete-btn');
           cancelBtn.classList.remove('hidden');
           return;
@@ -1321,6 +1404,13 @@ el.onlineJoinBtn.addEventListener('click', () => selectOnlineChoice('join'));
 el.onlineFindBtn.addEventListener('click', () => selectOnlineChoice('find'));
 
 el.watchGamesBtn.addEventListener('click', () => {
+  // Already signed in with an allowed teacher account (whether that
+  // sign-in happened here, via My Stats, or via My Classes — it's all
+  // the same Firebase session) — skip the prompt and go straight in.
+  if(state.googleUser && isTeacherAccount()){
+    openWatchList();
+    return;
+  }
   el.teacherPinError.textContent = '';
   el.teacherPinSubmitBtn.disabled = false;
   el.teacherPinSubmitBtn.textContent = 'Sign in with Google';
@@ -1342,6 +1432,15 @@ el.myStatsModal.addEventListener('click', (e) => {
   if(e.target === el.myStatsModal) el.myStatsModal.classList.add('hidden');
 });
 el.myStatsSigninBtn.addEventListener('click', handleMyStatsSignIn);
+
+el.myClassesBtn.addEventListener('click', openMyClasses);
+el.myClassesCloseBtn.addEventListener('click', () => {
+  el.myClassesModal.classList.add('hidden');
+});
+el.myClassesModal.addEventListener('click', (e) => {
+  if(e.target === el.myClassesModal) el.myClassesModal.classList.add('hidden');
+});
+el.myClassesSigninBtn.addEventListener('click', handleMyClassesSignIn);
 
 el.closeWatchListBtn.addEventListener('click', closeWatchList);
 el.watchListModal.addEventListener('click', (e) => {
@@ -1511,6 +1610,7 @@ function resetToSetup(){
   stopWatchingChallenge();
   el.teacherPinModal.classList.add('hidden');
   el.myStatsModal.classList.add('hidden');
+  el.myClassesModal.classList.add('hidden');
   el.worksheetModal.classList.add('hidden');
   state.missLog = [];
   state.rematchFinalizing = false;
@@ -3108,9 +3208,11 @@ async function loadMyBadges(){
   try{
     const stats = await getPlayerStats(state.googleUser.uid);
     state.myBadges = new Set(Object.keys(stats.badges || {}));
+    state.myStats = stats;
   } catch(err){
     console.error('Failed to load badges:', err);
     state.myBadges = new Set();
+    state.myStats = null;
   }
   if(!el.myStatsModal.classList.contains('hidden')){
     renderMyStatsBadges();
@@ -3123,6 +3225,46 @@ async function loadMyBadges(){
 function renderMyStatsBadges(){
   renderBadgeIcons(el.myStatsBadgesGrid, state.myBadges);
   el.myStatsBadgesEmpty.classList.toggle('hidden', state.myBadges.size > 0);
+  renderNextBadgeProgress();
+}
+
+/* Renders the "Up Next" progress bars — one per not-yet-earned badge
+   family, from getNextBadgeProgress() in badges.js. Hidden entirely
+   once every family is fully earned (or if we don't have stats to
+   compute progress from yet, e.g. right after signing out). */
+function renderNextBadgeProgress(){
+  el.myStatsBadgeProgressList.innerHTML = '';
+  if(!state.myStats){
+    el.myStatsBadgeProgressSection.classList.add('hidden');
+    return;
+  }
+  const items = getNextBadgeProgress(state.myStats, state.myBadges);
+  el.myStatsBadgeProgressSection.classList.toggle('hidden', items.length === 0);
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'badge-progress-row';
+
+    const label = document.createElement('div');
+    label.className = 'badge-progress-label';
+    const emojiSpan = document.createElement('span');
+    emojiSpan.className = 'badge-progress-emoji';
+    emojiSpan.textContent = item.emoji;
+    label.append(emojiSpan, document.createTextNode(` ${item.name}`));
+
+    const track = document.createElement('div');
+    track.className = 'badge-progress-track';
+    const fill = document.createElement('div');
+    fill.className = 'badge-progress-fill';
+    fill.style.width = `${item.percent}%`;
+    track.appendChild(fill);
+
+    const caption = document.createElement('p');
+    caption.className = 'badge-progress-caption';
+    caption.textContent = item.caption;
+
+    row.append(label, track, caption);
+    el.myStatsBadgeProgressList.appendChild(row);
+  });
 }
 
 /* Renders one small emoji per earned badge into `container`. Each

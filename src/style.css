@@ -693,6 +693,37 @@ body{
 
 .class-delete-btn:hover{ color:var(--bad); }
 
+/* Icon-only variant of the rename/delete/remove-student action buttons —
+   overrides the text-link look above (underline, text sizing) with a
+   small square icon button. The .class-rename-btn / .class-delete-btn
+   classes are still applied alongside this one purely so the existing
+   hover-color rules above keep working unchanged; the admin-feedback
+   "Delete" button elsewhere still uses .class-rename-btn on its own
+   (as a text link) and is unaffected since it never gets this class. */
+.class-icon-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:24px;
+  height:24px;
+  padding:0;
+  border:none;
+  border-radius:6px;
+  background:none;
+  text-decoration:none;
+  cursor:pointer;
+  transition:color 0.15s ease, background 0.15s ease;
+}
+
+.class-icon-btn svg{
+  width:14px;
+  height:14px;
+}
+
+.class-icon-btn:hover{
+  background:rgba(255,255,255,0.06);
+}
+
 .class-delete-warning{
   flex-basis:100%;
   margin:0 0 2px;
@@ -712,14 +743,22 @@ body{
   white-space:nowrap;
 }
 
-.class-roster-remove-btn,
+.class-roster-remove-btn{
+  color:var(--chalk-dim);
+  margin-left:8px;
+  vertical-align:middle;
+}
+
+.class-roster-remove-btn:hover{ color:var(--bad); }
+
+.class-roster-remove-btn:first-child{ margin-left:0; }
+
 .class-roster-remove-cell .class-rename-cancel{
   display:inline;
   margin:0 0 0 10px;
   font-size:0.78rem;
+  vertical-align:middle;
 }
-
-.class-roster-remove-btn:first-child{ margin-left:0; }
 
 .class-rename-row{
   display:flex;
@@ -778,6 +817,11 @@ body{
 
 .class-card .stats-table{ margin-bottom:0; }
 .class-card .field-note{ margin:8px 0 0; }
+
+/* Student names in a teacher's class roster — a bit smaller than the
+   default .stats-table td sizing, since a full roster can run long and
+   the names are the least numeric/scannable column. */
+.class-card .stats-table td:first-child{ font-size:0.8rem; }
 
 /* ---------- Watch list (teacher spectator view) ---------- */
 .watch-list-body{
@@ -1390,6 +1434,61 @@ body{
    always agree. */
 
 .profile-badges:empty{ display:none; }
+
+/* "Up Next" progress bars — sits inside the same badges panel, right
+   below the earned-badges grid, using the same chalk/amber palette. */
+.my-stats-badge-progress-heading{
+  margin:14px 0 8px;
+  padding-top:10px;
+  border-top:1px solid var(--line);
+  font-family:'Inter', sans-serif;
+  font-size:0.75rem;
+  font-weight:700;
+  color:var(--chalk-dim);
+  text-transform:uppercase;
+  letter-spacing:0.04em;
+}
+
+.badge-progress-row{
+  margin:0 0 10px;
+}
+
+.badge-progress-row:last-child{ margin-bottom:0; }
+
+.badge-progress-label{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-bottom:4px;
+  font-family:'Inter', sans-serif;
+  font-size:0.8rem;
+  font-weight:600;
+  color:var(--chalk);
+}
+
+.badge-progress-emoji{ font-size:0.95rem; }
+
+.badge-progress-track{
+  width:100%;
+  height:6px;
+  border-radius:3px;
+  background:rgba(255,255,255,0.08);
+  overflow:hidden;
+}
+
+.badge-progress-fill{
+  height:100%;
+  border-radius:3px;
+  background:linear-gradient(90deg, rgba(255,215,0,0.55), rgba(255,215,0,0.9));
+  transition:width 0.3s ease;
+}
+
+.badge-progress-caption{
+  margin:4px 0 0;
+  font-family:'Inter', sans-serif;
+  font-size:0.7rem;
+  color:var(--chalk-dim);
+}
 
 .badge-icon{
   display:inline-flex;

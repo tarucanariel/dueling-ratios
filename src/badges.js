@@ -99,3 +99,78 @@ export function checkStreakBadge(streakCount, earnedBadgeIds){
   if(streakCount === 50 && !earnedBadgeIds.has('streak-50')) return 'streak-50';
   return null;
 }
+
+/* =========================================================
+   "Up next" progress bars — for My Stats, showing how close a player
+   is to their next not-yet-earned badge. Grouped into families so
+   that once persistence-5 is earned, the bar shows progress toward
+   persistence-25 instead of just disappearing; a fully-earned family
+   is left out of the results entirely.
+
+   Deliberately covers only the threshold/counter badges above
+   (persistence-*, sharpshooter, accuracy-98, lifetime-1000) — every
+   one of them is driven by a running total this file already reads
+   off `stats`. The streak badges (10/20/50) and the per-game ones
+   (perfect-game, beat-the-clock) are left out on purpose: they're
+   instant/event-based rather than a running count, so there's no
+   meaningful "62% of the way there" number to show for them without
+   also persisting a lifetime best-streak stat, which doesn't exist
+   yet — see the ranks/progress-bar discussion this was built from.
+   ========================================================= */
+
+const PROGRESS_FAMILIES = [
+  ['persistence-5', 'persistence-25', 'persistence-100'],
+  ['sharpshooter', 'accuracy-98'],
+  ['lifetime-1000'],
+];
+
+const PROGRESS_TARGETS = {
+  'persistence-5':   { kind: 'count', target: 5 },
+  'persistence-25':  { kind: 'count', target: 25 },
+  'persistence-100': { kind: 'count', target: 100 },
+  'sharpshooter':    { kind: 'accuracy', minAnswered: 50, minAccuracy: 0.9 },
+  'accuracy-98':     { kind: 'accuracy', minAnswered: 200, minAccuracy: 0.98 },
+  'lifetime-1000':   { kind: 'count', target: 1000 },
+};
+
+/* Returns one "up next" entry per family above (skipping any family
+   that's fully earned), each as:
+     { id, emoji, name, percent, caption }
+   `percent` (0-100, already rounded/clamped) is ready to plug straight
+   into a progress-bar's width. For the two accuracy badges, which each
+   have BOTH a minimum-volume and a minimum-accuracy requirement,
+   `percent` is the more-limiting of the two (i.e. whichever the player
+   is furthest from), and `caption` always states both numbers so nothing
+   about the requirement is hidden. */
+export function getNextBadgeProgress(stats, earnedBadgeIds){
+  const totalGames = totalGamesPlayed(stats);
+  const { correct, wrong } = totalCorrectAndWrong(stats);
+  const totalAnswered = correct + wrong;
+
+  const results = [];
+  PROGRESS_FAMILIES.forEach((family) => {
+    const nextId = family.find((id) => !earnedBadgeIds.has(id));
+    if(!nextId) return; // every badge in this family is already earned
+    const def = BADGE_DEFS_BY_ID[nextId];
+    const target = PROGRESS_TARGETS[nextId];
+    let percent, caption;
+
+    if(target.kind === 'count'){
+      const current = nextId === 'lifetime-1000' ? correct : totalGames;
+      percent = Math.min(100, Math.round((current / target.target) * 100));
+      const noun = nextId === 'lifetime-1000' ? 'correct answers' : 'games played';
+      caption = `${current} / ${target.target} ${noun}`;
+    } else { // 'accuracy'
+      const volumeFrac = Math.min(1, totalAnswered / target.minAnswered);
+      const accuracy = totalAnswered > 0 ? correct / totalAnswered : 0;
+      const accuracyFrac = Math.min(1, accuracy / target.minAccuracy);
+      percent = Math.round(Math.min(volumeFrac, accuracyFrac) * 100);
+      const accuracyPct = Math.round(accuracy * 100);
+      const minAccuracyPct = Math.round(target.minAccuracy * 100);
+      caption = `${totalAnswered} / ${target.minAnswered} answered \u2022 ${accuracyPct}% accuracy (need ${minAccuracyPct}%)`;
+    }
+
+    results.push({ id: nextId, emoji: def.emoji, name: def.name, percent, caption });
+  });
+  return results;
+}
