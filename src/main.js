@@ -499,6 +499,23 @@ function sumAllModes(stats){
   return formatStatsRow(games, correct, wrong);
 }
 
+/* Re-checks the three cumulative-threshold badge families (persistence,
+   accuracy, lifetime) against freshly-loaded stats and awards +
+   celebrates any that are already numerically satisfied but not yet
+   recorded as earned. Run every time stats are loaded (not just at
+   game-end) so a badge that narrowly missed being caught right when
+   its threshold was first crossed — e.g. a rare timing gap between a
+   Firebase write and the very next read — gets picked up the next
+   time the player simply opens My Stats, instead of staying stuck
+   until another game happens to re-trigger the check. Passes 0/false
+   for the per-game-only args (perfect-game, beat-the-clock) since
+   those describe a single just-finished game, not a running total,
+   and aren't meaningful here. */
+async function checkAndAwardCatchUpBadges(stats){
+  const newlyEarned = checkGameEndBadges(stats, state.myBadges, 0, 0, false);
+  if(newlyEarned.length > 0) await awardAndCelebrateBadges(newlyEarned);
+}
+
 async function openMyStats(){
   el.myStatsError.textContent = '';
   el.myStatsModal.classList.remove('hidden');
@@ -517,6 +534,7 @@ async function openMyStats(){
     const stats = await getPlayerStats(state.googleUser.uid);
     state.myBadges = new Set(Object.keys(stats.badges || {}));
     state.myStats = stats;
+    await checkAndAwardCatchUpBadges(stats);
     renderMyStatsBadges();
 
     const solo = formatStatsRow(stats.solo.gamesPlayed, stats.solo.correctCount, stats.solo.wrongCount);
@@ -3209,6 +3227,7 @@ async function loadMyBadges(){
     const stats = await getPlayerStats(state.googleUser.uid);
     state.myBadges = new Set(Object.keys(stats.badges || {}));
     state.myStats = stats;
+    await checkAndAwardCatchUpBadges(stats);
   } catch(err){
     console.error('Failed to load badges:', err);
     state.myBadges = new Set();
