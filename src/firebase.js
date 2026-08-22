@@ -143,12 +143,40 @@ export function watchAuthState(callback){
 
 export const STATS_MODES = ['solo', 'sameDevice', 'vsComputer', 'online'];
 
-export async function recordGameResult(uid, modeKey, correctCount, wrongCount){
+// Fraction operations tracked lifetime (across all modes, same as the
+// existing accuracy/lifetime badges) for the operation-mastery badges —
+// see badges.js's OPERATION_BADGES. Keyed by the same symbol used on
+// problem.op throughout logic.js/main.js, not by an English name, so
+// no translation layer is needed between "this pair's operation" and
+// "which counter to increment".
+export const OPERATIONS = ['+', '-', '×', '÷'];
+
+// Firebase Realtime Database paths can't contain '.', '#', '$', '[', ']',
+// or '/' — none of our operation symbols hit that, but '÷' and '×' are
+// still ordinary Unicode characters, not ASCII, so a small explicit map
+// (rather than using the symbol directly as a path segment) keeps the
+// on-disk schema readable and insulates it from ever silently breaking
+// if a symbol choice changes again upstream in logic.js.
+const OP_PATH_KEYS = { '+': 'add', '-': 'subtract', '×': 'multiply', '÷': 'divide' };
+
+export async function recordGameResult(uid, modeKey, correctCount, wrongCount, opTally){
   const updates = {
     [`playerStats/${uid}/${modeKey}/gamesPlayed`]: increment(1),
     [`playerStats/${uid}/${modeKey}/correctCount`]: increment(correctCount),
     [`playerStats/${uid}/${modeKey}/wrongCount`]: increment(wrongCount),
   };
+  // opTally: { '+': {correct, wrong}, '-': {...}, ... } — only the
+  // operations actually played this game need an entry; see
+  // state.opTally in main.js for how it's built during play.
+  if(opTally){
+    OPERATIONS.forEach((op) => {
+      const t = opTally[op];
+      if(!t || (!t.correct && !t.wrong)) return;
+      const pathKey = OP_PATH_KEYS[op];
+      if(t.correct) updates[`playerStats/${uid}/opStats/${pathKey}/correctCount`] = increment(t.correct);
+      if(t.wrong) updates[`playerStats/${uid}/opStats/${pathKey}/wrongCount`] = increment(t.wrong);
+    });
+  }
   return update(ref(db), updates);
 }
 
@@ -163,6 +191,17 @@ export async function getPlayerStats(uid){
       correctCount: d.correctCount || 0,
       wrongCount: d.wrongCount || 0,
     };
+  });
+  // Per-operation lifetime totals, for the operation-mastery badges —
+  // same read, just a different sub-node of playerStats/{uid}. Always
+  // returns an entry for every op (defaulting to zero), same defensive
+  // shape as the per-mode stats above, so callers never need an extra
+  // null-check.
+  const opData = data.opStats || {};
+  stats.opStats = {};
+  OPERATIONS.forEach((op) => {
+    const d = opData[OP_PATH_KEYS[op]] || {};
+    stats.opStats[op] = { correctCount: d.correctCount || 0, wrongCount: d.wrongCount || 0 };
   });
   // Class membership — not a stats mode, just piggybacking on this same
   // read since it's the same playerStats/{uid} node either way. See

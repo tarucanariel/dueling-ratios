@@ -13,7 +13,17 @@
    practice tool should be doing.
    ========================================================= */
 
-import { STATS_MODES } from './firebase.js';
+import { STATS_MODES, OPERATIONS } from './firebase.js';
+
+// Maps a problem's operation symbol (as used throughout logic.js/main.js)
+// to its operation-mastery badge id and a plain-English noun for badge
+// captions — kept together here since every operation-mastery badge
+// needs both.
+const OP_BADGE_IDS = { '+': 'addition-mastery', '-': 'subtraction-mastery', '×': 'multiplication-mastery', '÷': 'division-mastery' };
+const OP_NOUNS = { '+': 'addition', '-': 'subtraction', '×': 'multiplication', '÷': 'division' };
+const OP_MASTERY_MIN_ANSWERED = 50;
+const OP_MASTERY_MIN_ACCURACY = 0.9;
+const CAPSTONE_ID = 'operations-mastered';
 
 export const BADGE_DEFS = [
   { id: 'persistence-5',   emoji: '🌱', name: 'Getting Started', description: 'Play 5 games.' },
@@ -27,6 +37,11 @@ export const BADGE_DEFS = [
   { id: 'streak-50',       emoji: '🌟', name: 'Flawless Fifty',  description: 'Reach a 50-streak in a single game.' },
   { id: 'lifetime-1000',   emoji: '🧮', name: 'Math Machine',    description: 'Answer 1,000 questions correctly, lifetime.' },
   { id: 'accuracy-98',     emoji: '🎓', name: 'Math Whiz',       description: '98%+ accuracy over at least 200 answers.' },
+  { id: 'addition-mastery',       emoji: '➕', name: 'Addition Ace',         description: `90%+ accuracy over at least ${OP_MASTERY_MIN_ANSWERED} addition answers, lifetime.` },
+  { id: 'subtraction-mastery',    emoji: '➖', name: 'Subtraction Star',     description: `90%+ accuracy over at least ${OP_MASTERY_MIN_ANSWERED} subtraction answers, lifetime.` },
+  { id: 'multiplication-mastery', emoji: '✖️', name: 'Multiplication Master', description: `90%+ accuracy over at least ${OP_MASTERY_MIN_ANSWERED} multiplication answers, lifetime.` },
+  { id: 'division-mastery',       emoji: '➗', name: 'Division Dynamo',      description: `90%+ accuracy over at least ${OP_MASTERY_MIN_ANSWERED} division answers, lifetime.` },
+  { id: CAPSTONE_ID, emoji: '🧠', name: 'Fraction Champion', description: 'Earn all four operation-mastery badges.' },
 ];
 
 export const BADGE_DEFS_BY_ID = Object.fromEntries(BADGE_DEFS.map((b) => [b.id, b]));
@@ -74,6 +89,27 @@ export function checkGameEndBadges(stats, earnedBadgeIds, gameCorrectCount, game
     newlyEarned.push('lifetime-1000');
   }
 
+  // Operation mastery — lifetime, per operation, same volume+accuracy
+  // shape as sharpshooter/accuracy-98 above but scoped to stats.opStats
+  // instead of the combined totals. stats.opStats may be missing on
+  // very old cached stats objects (pre-dates this feature) — treated
+  // as zero/zero, same defensive default getPlayerStats() itself uses.
+  OPERATIONS.forEach((op) => {
+    const badgeId = OP_BADGE_IDS[op];
+    const opStat = stats.opStats?.[op] || { correctCount: 0, wrongCount: 0 };
+    const answered = opStat.correctCount + opStat.wrongCount;
+    if(answered >= OP_MASTERY_MIN_ANSWERED && opStat.correctCount / answered >= OP_MASTERY_MIN_ACCURACY && !earnedBadgeIds.has(badgeId)){
+      newlyEarned.push(badgeId);
+    }
+  });
+  // Capstone — checked against earnedBadgeIds OR this same check's own
+  // newlyEarned array, so it can fire in the same pass as the 4th
+  // operation badge rather than needing a second game/visit after it.
+  if(!earnedBadgeIds.has(CAPSTONE_ID)){
+    const allMastered = Object.values(OP_BADGE_IDS).every((id) => earnedBadgeIds.has(id) || newlyEarned.includes(id));
+    if(allMastered) newlyEarned.push(CAPSTONE_ID);
+  }
+
   if(gameCorrectCount > 0 && gameWrongCount === 0 && !earnedBadgeIds.has('perfect-game')){
     newlyEarned.push('perfect-game');
   }
@@ -108,20 +144,24 @@ export function checkStreakBadge(streakCount, earnedBadgeIds){
    is left out of the results entirely.
 
    Deliberately covers only the threshold/counter badges above
-   (persistence-*, sharpshooter, accuracy-98, lifetime-1000) — every
-   one of them is driven by a running total this file already reads
-   off `stats`. The streak badges (10/20/50) and the per-game ones
-   (perfect-game, beat-the-clock) are left out on purpose: they're
-   instant/event-based rather than a running count, so there's no
-   meaningful "62% of the way there" number to show for them without
-   also persisting a lifetime best-streak stat, which doesn't exist
-   yet — see the ranks/progress-bar discussion this was built from.
-   ========================================================= */
+   (persistence-*, sharpshooter, accuracy-98, lifetime-1000, and the
+   4 operation-mastery badges) — every one of them is driven by a
+   running total this file already reads off `stats`. The streak
+   badges (10/20/50), the per-game ones (perfect-game, beat-the-clock),
+   and the operations-mastered capstone are left out on purpose: each
+   is either instant/event-based or itself a compound of other badges
+   rather than a running count, so there's no meaningful "62% of the
+   way there" number to show for them — see the ranks/progress-bar
+   discussion this was built from. */
 
 const PROGRESS_FAMILIES = [
   ['persistence-5', 'persistence-25', 'persistence-100'],
   ['sharpshooter', 'accuracy-98'],
   ['lifetime-1000'],
+  ['addition-mastery'],
+  ['subtraction-mastery'],
+  ['multiplication-mastery'],
+  ['division-mastery'],
 ];
 
 const PROGRESS_TARGETS = {
@@ -131,17 +171,24 @@ const PROGRESS_TARGETS = {
   'sharpshooter':    { kind: 'accuracy', minAnswered: 50, minAccuracy: 0.9 },
   'accuracy-98':     { kind: 'accuracy', minAnswered: 200, minAccuracy: 0.98 },
   'lifetime-1000':   { kind: 'count', target: 1000 },
+  'addition-mastery':       { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '+' },
+  'subtraction-mastery':    { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '-' },
+  'multiplication-mastery': { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '×' },
+  'division-mastery':       { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '÷' },
 };
 
 /* Returns one "up next" entry per family above (skipping any family
    that's fully earned), each as:
      { id, emoji, name, percent, caption }
    `percent` (0-100, already rounded/clamped) is ready to plug straight
-   into a progress-bar's width. For the two accuracy badges, which each
-   have BOTH a minimum-volume and a minimum-accuracy requirement,
+   into a progress-bar's width. For every accuracy-kind badge, which
+   has BOTH a minimum-volume and a minimum-accuracy requirement,
    `percent` is the more-limiting of the two (i.e. whichever the player
-   is furthest from), and `caption` always states both numbers so nothing
-   about the requirement is hidden. */
+   is furthest from), and `caption` always states both numbers so
+   nothing about the requirement is hidden. An operation-mastery target
+   (`target.op` set) reads its volume/accuracy from that operation's own
+   stats.opStats entry instead of the combined across-all-operations
+   totals the plain accuracy badges use. */
 export function getNextBadgeProgress(stats, earnedBadgeIds){
   const totalGames = totalGamesPlayed(stats);
   const { correct, wrong } = totalCorrectAndWrong(stats);
@@ -161,13 +208,23 @@ export function getNextBadgeProgress(stats, earnedBadgeIds){
       const noun = nextId === 'lifetime-1000' ? 'correct answers' : 'games played';
       caption = `${current} / ${target.target} ${noun}`;
     } else { // 'accuracy'
-      const volumeFrac = Math.min(1, totalAnswered / target.minAnswered);
-      const accuracy = totalAnswered > 0 ? correct / totalAnswered : 0;
+      // Plain accuracy badges (sharpshooter/accuracy-98) use the
+      // combined-across-all-operations totals; operation-mastery
+      // badges (target.op set) use that one operation's own tally.
+      let opCorrect = correct, opAnswered = totalAnswered;
+      if(target.op){
+        const opStat = stats.opStats?.[target.op] || { correctCount: 0, wrongCount: 0 };
+        opCorrect = opStat.correctCount;
+        opAnswered = opStat.correctCount + opStat.wrongCount;
+      }
+      const volumeFrac = Math.min(1, opAnswered / target.minAnswered);
+      const accuracy = opAnswered > 0 ? opCorrect / opAnswered : 0;
       const accuracyFrac = Math.min(1, accuracy / target.minAccuracy);
       percent = Math.round(Math.min(volumeFrac, accuracyFrac) * 100);
       const accuracyPct = Math.round(accuracy * 100);
       const minAccuracyPct = Math.round(target.minAccuracy * 100);
-      caption = `${totalAnswered} / ${target.minAnswered} answered \u2022 ${accuracyPct}% accuracy (need ${minAccuracyPct}%)`;
+      const noun = target.op ? `${OP_NOUNS[target.op]} problems` : 'answered';
+      caption = `${opAnswered} / ${target.minAnswered} ${noun} \u2022 ${accuracyPct}% accuracy (need ${minAccuracyPct}%)`;
     }
 
     results.push({ id: nextId, emoji: def.emoji, name: def.name, percent, caption });

@@ -38,6 +38,7 @@ const state = {
   onlineTimerPollId: null, // setInterval handle for the online chess-clock poll
   stopPresence: null, // cleanup function from trackPresence(), for the real player's own connection
   missLog: [], // wrong-attempt records for the current game, for the post-game review
+  opTally: {}, // { '+': {correct,wrong}, '-': {...}, ... } — THIS game's own per-operation tally for the signed-in local player only (never an opponent or the computer), flushed to Firebase via recordMyStats() at game end for the operation-mastery badges. Reset at the same points missLog is (see trackOpTally() below).
   rematchFinalizing: false, // guards against the host double-triggering resetRoomForRematch
   difficulty: 'medium', // 'easy' | 'medium' | 'hard' — only meaningful when mode === 'computer'
 
@@ -363,11 +364,30 @@ function modeToStatsKey(mode){
    actually uses for its own timer). Guessing from one shared variable
    here previously caused the Beat the Clock badge to silently never
    fire for online games even when a timer really was running. */
+/* Increments state.opTally for the given operation symbol — called
+   only for the signed-in local player's own answers (see call sites
+   in handleTileClick/handleOnlineTileClick), never for a same-device
+   opponent or the computer, same scoping as the streak-badge check
+   right next to those calls.
+
+   Known edge case: reconnecting mid-game to an online room resets
+   opTally back to zero (see onRoomUpdate's `if(!prevRoom)`), so any
+   operations answered before the disconnect won't count toward
+   operation-mastery for that game. Same spirit as the app's existing
+   "no disconnect/presence detection" limitation — acceptable for a
+   classroom practice tool, not worth the complexity of persisting a
+   mid-game tally to Firebase just to survive a reconnect. */
+function trackOpTally(op, isCorrect){
+  if(!state.opTally[op]) state.opTally[op] = { correct: 0, wrong: 0 };
+  if(isCorrect) state.opTally[op].correct += 1;
+  else state.opTally[op].wrong += 1;
+}
+
 async function recordMyStats(mode, correctCount, wrongCount, hadTimeControl){
   if(!state.googleUser) return;
   const uid = state.googleUser.uid;
   try{
-    await recordGameResult(uid, modeToStatsKey(mode), correctCount || 0, wrongCount || 0);
+    await recordGameResult(uid, modeToStatsKey(mode), correctCount || 0, wrongCount || 0, state.opTally);
     const freshStats = await getPlayerStats(uid);
     state.myBadges = new Set(Object.keys(freshStats.badges || {})); // in case another tab/session earned something since our last load
     state.myStats = freshStats;
@@ -1565,6 +1585,7 @@ function handlePrimaryButtonClick(){
 
 function tryStartGame(){
   state.missLog = [];
+  state.opTally = {};
   const name1 = getMyName();
   const name2 = el.player2Name.value.trim();
 
@@ -1631,6 +1652,7 @@ function resetToSetup(){
   el.myClassesModal.classList.add('hidden');
   el.worksheetModal.classList.add('hidden');
   state.missLog = [];
+  state.opTally = {};
   state.rematchFinalizing = false;
   el.reviewModal.classList.add('hidden');
   el.winnerModal.classList.add('hidden');
@@ -2115,6 +2137,7 @@ function onRoomUpdate(room){
   if(state.isOnline) saveSeat(state.roomCode, state.myRole, room.players?.[state.myRole]?.name || '');
 
   const prevRoom = state.room; // snapshot from before this update, used only for sound diffing below
+  if(!prevRoom) state.opTally = {}; // first update for this room subscription — a fresh game (or a rejoin, which restarts the tally; see trackOpTally()'s doc comment for that trade-off)
   state.room = room;
   state.problem = room.problem;
   state.layout = buildProblemLayout(room.problem);
@@ -2324,6 +2347,7 @@ function handleOnlineTileClick(tileId){
     });
     el.feedbackLine.textContent = `Correct! ${player.name} +1`;
     el.feedbackLine.className = 'feedback-line good';
+    if(state.googleUser) trackOpTally(state.problem.op, true);
 
     const newPool = state.pool.filter((_, i) => i !== tileIdx);
     const newCellIndex = state.cellIndex + 1;
@@ -2355,6 +2379,7 @@ function handleOnlineTileClick(tileId){
     });
     el.feedbackLine.textContent = `Not quite. ${player.name} -1`;
     el.feedbackLine.className = 'feedback-line bad';
+    if(state.googleUser) trackOpTally(state.problem.op, false);
 
     updates[`players/${myKey}/score`] = player.score - 1;
     updates[`players/${myKey}/wrongCount`] = (state.room.players[myKey].wrongCount || 0) + 1;
@@ -2636,6 +2661,7 @@ function rematchLocal(){
   el.winnerModal.classList.add('hidden');
   el.reviewModal.classList.add('hidden');
   state.missLog = [];
+  state.opTally = {};
   state.pairIndex = 0;
   state.currentPlayer = 0;
   state.players.forEach(p => {
@@ -3489,6 +3515,7 @@ function handleTileClick(tileId){
     if(state.currentPlayer === 0 && state.googleUser){
       const badgeId = checkStreakBadge(player.streak, state.myBadges);
       if(badgeId) awardAndCelebrateBadges([badgeId]);
+      trackOpTally(state.problem.op, true);
     }
 
     state.cellIndex++;
@@ -3506,6 +3533,9 @@ function handleTileClick(tileId){
     player.score -= 1;
     player.wrongCount += 1;
     player.streak = 0;
+    if(state.currentPlayer === 0 && state.googleUser){
+      trackOpTally(state.problem.op, false);
+    }
     state.missLog.push({
       pairIndex: state.pairIndex,
       problem: { ...state.problem },

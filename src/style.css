@@ -815,7 +815,27 @@ body{
   letter-spacing:0.08em;
 }
 
-.class-card .stats-table{ margin-bottom:0; }
+.class-card .stats-table{
+  margin-bottom:0;
+  table-layout:fixed;
+}
+
+/* Explicit widths for the 3 narrow columns (Games, Accuracy, Remove) so
+   they stay snug regardless of viewport width; the Student column (1st,
+   left unspecified) absorbs 100% of whatever's left. Without this, the
+   default auto-layout stretches every column to fill the table's 100%
+   width — including the near-empty Remove column, which then ends up
+   much wider than its icon needs, shoving the icon far to the right of
+   the row it belongs to. Most noticeable on narrow/mobile viewports,
+   where the proportional stretch is largest relative to the row. */
+.class-card .stats-table th:nth-child(2),
+.class-card .stats-table td:nth-child(2){ width:52px; }
+
+.class-card .stats-table th:nth-child(3),
+.class-card .stats-table td:nth-child(3){ width:68px; }
+
+.class-card .stats-table th:nth-child(4),
+.class-card .stats-table td:nth-child(4){ width:46px; }
 .class-card .field-note{ margin:8px 0 0; }
 
 /* Student names in a teacher's class roster — a bit smaller than the
