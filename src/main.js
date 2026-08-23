@@ -6,7 +6,7 @@ import { ref, remove } from 'firebase/database';
 import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
-import { playSound } from './sounds.js';
+import { playSound, playCorrectSound } from './sounds.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 
 /* =========================================================
@@ -2166,8 +2166,6 @@ function onRoomUpdate(room){
   // Shared milestone sounds: both devices receive this same update through
   // their own listener, so diffing prev-vs-new here fires them identically
   // for host and guest, regardless of which one triggered the change.
-  // (Correct/wrong sounds are handled separately, immediately, at the
-  // point of the click itself — see handleOnlineTileClick.)
   const prevGuestPresent = !!prevRoom?.players?.guest;
   if(!prevGuestPresent && guestP) playSound('start');
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
@@ -2175,6 +2173,18 @@ function onRoomUpdate(room){
     playSound('winner');
     const myFinishedP = state.myRole === 'host' ? hostP : guestP;
     recordMyStats('online', myFinishedP.correctCount, myFinishedP.wrongCount, room.settings?.timeControlSeconds > 0);
+  }
+  // The toss animation + sound for MY OWN move already played live, at
+  // the moment I clicked the tile (see handleOnlineTileClick) — this
+  // is what lets the OPPONENT'S device replay that same toss+sound for
+  // MY move too, using exactly what I actually had equipped, not
+  // anything derived from their own local state. Guarded on prevRoom
+  // (no replay on first subscribe/reconnect — nothing "just happened"
+  // yet) and on the seq counter actually advancing (ignore unrelated
+  // updates that don't touch lastMove), and skips replaying my own
+  // move back to myself now that it's round-tripped through Firebase.
+  if(prevRoom && room.lastMove && room.lastMove.seq !== prevRoom.lastMove?.seq && room.lastMove.role !== state.myRole){
+    replayRemoteMove(room.lastMove);
   }
   // Streak popups: same idea as the sounds above — diff prev-vs-new so
   // both devices fire the identical popup for whichever player actually
@@ -2340,10 +2350,24 @@ function handleOnlineTileClick(tileId){
   const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
 
   const updates = {};
+  // Written on every move (right or wrong) so the OTHER player and any
+  // spectators can replay the same toss+sound on their own screens —
+  // see replayRemoteMove() in onRoomUpdate/onSpectateRoomUpdate below.
+  // `seq` is a plain incrementing counter, used purely so watchers can
+  // tell "a new move just happened" apart from an unrelated field
+  // changing, the same way pairIndex/streak are already diffed above.
+  updates.lastMove = {
+    seq: (state.room.lastMove?.seq || 0) + 1,
+    role: myKey,
+    tileId,
+    cellIndex: state.cellIndex,
+    correct: isCorrect,
+    effectId: isCorrect ? activeTileEffectId() : null,
+  };
 
   if(isCorrect){
-    playSound('correct');
-    animateTileThrow(tileEl, slotEls[0], 'correct', true); // this function only ever runs on my own turn — see the "not your turn" early return above
+    playCorrectSound(activeTileEffectId()); // this function only ever runs on my own turn — see the "not your turn" early return above
+    animateTileThrow(tileEl, slotEls[0], 'correct', true);
     slotEls.forEach(slotEl => {
       slotEl.textContent = tile.value;
       slotEl.classList.remove('active', 'pending');
@@ -2418,6 +2442,35 @@ function handleOnlineTileClick(tileId){
   });
   // state.inputLocked is released once the listener's onRoomUpdate fires
   // with the confirmed state (works for both the sender and the opponent).
+}
+
+/* Replays another player's move — the toss animation and its sound —
+   on a WATCHING client (the opponent, or a spectator), using the
+   room.lastMove data the mover just wrote in handleOnlineTileClick()
+   above. Deliberately reads everything off `lastMove` rather than any
+   local state, since the whole point is showing/hearing what the
+   MOVER had equipped, not the watcher's own.
+
+   Must run BEFORE the room-sync's full renderProblem()/renderPool()
+   repaint (see its call sites in onRoomUpdate/onSpectateRoomUpdate) —
+   it needs the pre-repaint DOM, which still has the tile and cell-slot
+   from the move that just happened; once the repaint runs, that tile
+   is gone from the pool and the slot's already showing its resting
+   state. Silently no-ops if either element isn't found (e.g. right
+   after a reconnect, or if this fires before the DOM has ever painted
+   the room at all) rather than throwing. */
+function replayRemoteMove(lastMove){
+  const tileEl = el.poolTray.querySelector(`.tile-btn[data-tile-id="${lastMove.tileId}"]`);
+  const slotEl = document.querySelector(`.cell-slot[data-cell-index="${lastMove.cellIndex}"]`);
+  if(!tileEl || !slotEl) return;
+  if(lastMove.correct){
+    const effectId = lastMove.effectId || 'classic';
+    playCorrectSound(effectId);
+    animateTileThrow(tileEl, slotEl, 'correct', true, effectId);
+  } else {
+    playSound('wrong');
+    animateTileThrow(tileEl, slotEl, 'wrong');
+  }
 }
 
 /* =========================================================
@@ -2879,6 +2932,12 @@ function renderSpectatorRoom(room){
   if(!prevGuestPresent && guestP) playSound('start');
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
+  // Unlike onRoomUpdate's version of this same check, a spectator has
+  // no "own move" to skip — every move belongs to one of the two
+  // players being watched, so replay all of them.
+  if(prevRoom && room.lastMove && room.lastMove.seq !== prevRoom.lastMove?.seq){
+    replayRemoteMove(room.lastMove);
+  }
   if(prevRoom && guestP){
     ['host', 'guest'].forEach((roleKey) => {
       const prevStreak = prevRoom.players?.[roleKey]?.streak || 0;
@@ -3172,7 +3231,13 @@ function syncPoolLockState(){
    Classic Arc regardless of what's equipped, since this is meant as a
    personal reward, not a shared game skin. The wrong-answer animation
    always stays as-is too, regardless of what's equipped, since it's a
-   negative-feedback cue, not something to reward. */
+   negative-feedback cue, not something to reward.
+
+   Each unlocked effect also swaps the correct-answer SOUND, not just
+   the animation — see playCorrectSound() in sounds.js, keyed off this
+   same id so there's one unlock/one picker for both. Same turn-scoping
+   applies: the call sites below resolve 'classic' instead of the real
+   effect id whenever it isn't actually this player's own turn. */
 const TILE_EFFECTS = [
   { id: 'classic',        name: 'Classic Arc',     icon: '\uD83C\uDFF9', unlockBadgeId: null },
   { id: 'bounce-drop',    name: 'Bounce Drop',     icon: '\uD83C\uDFC0', unlockBadgeId: 'persistence-5' },
@@ -3266,7 +3331,7 @@ function renderMyStatsEffects(){
   });
 }
 
-function animateTileThrow(tileEl, targetEl, variant, isMyTurn){
+function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride){
   if(!tileEl || !targetEl) return;
   const startRect = tileEl.getBoundingClientRect();
   const endRect = targetEl.getBoundingClientRect();
@@ -3294,7 +3359,16 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn){
   // regardless of what's equipped — the whole point is that this is a
   // personal reward, not something anyone sharing the screen/match
   // benefits from.
-  const effectId = (variant === 'wrong' || !isMyTurn) ? null : activeTileEffectId();
+  //
+  // effectIdOverride bypasses all of that: it's how replayRemoteMove()
+  // below plays back a REMOTE player's own equipped effect (read from
+  // synced room data) rather than deriving one from local state at
+  // all — used for the opponent/spectator seeing and hearing an online
+  // player's toss+sound as it genuinely happened for them, not what
+  // the watcher has equipped themselves.
+  const effectId = variant === 'wrong'
+    ? null
+    : (effectIdOverride !== undefined ? effectIdOverride : (isMyTurn ? activeTileEffectId() : null));
 
   let keyframes, duration, easing;
   if(variant === 'wrong'){
@@ -3767,7 +3841,7 @@ function handleTileClick(tileId){
   const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
 
   if(isCorrect){
-    playSound('correct');
+    playCorrectSound(state.currentPlayer === 0 ? activeTileEffectId() : 'classic');
     animateTileThrow(tileEl, slotEls[0], 'correct', state.currentPlayer === 0);
     player.score += 1;
     player.correctCount += 1;
