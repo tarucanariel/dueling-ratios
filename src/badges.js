@@ -13,7 +13,7 @@
    practice tool should be doing.
    ========================================================= */
 
-import { STATS_MODES, OPERATIONS } from './firebase.js';
+import { STATS_MODES, OPERATIONS } from './constants.js';
 
 // Maps a problem's operation symbol (as used throughout logic.js/main.js)
 // to its operation-mastery badge id and a plain-English noun for badge

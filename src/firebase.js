@@ -141,15 +141,12 @@ export function watchAuthState(callback){
    writes (e.g. finishing games in two tabs) merge correctly server-side
    instead of racing on a read-then-write. ========================= */
 
-export const STATS_MODES = ['solo', 'sameDevice', 'vsComputer', 'online'];
-
-// Fraction operations tracked lifetime (across all modes, same as the
-// existing accuracy/lifetime badges) for the operation-mastery badges —
-// see badges.js's OPERATION_BADGES. Keyed by the same symbol used on
-// problem.op throughout logic.js/main.js, not by an English name, so
-// no translation layer is needed between "this pair's operation" and
-// "which counter to increment".
-export const OPERATIONS = ['+', '-', '×', '÷'];
+// STATS_MODES/OPERATIONS now live in constants.js (a plain, side-effect-
+// free module) so badges.js can import them without pulling in the
+// Firebase SDK — re-exported here so every existing `import { STATS_MODES }
+// from './firebase.js'` elsewhere keeps working unchanged.
+export { STATS_MODES, OPERATIONS } from './constants.js';
+import { OPERATIONS } from './constants.js';
 
 // Firebase Realtime Database paths can't contain '.', '#', '$', '[', ']',
 // or '/' — none of our operation symbols hit that, but '÷' and '×' are
