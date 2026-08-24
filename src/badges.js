@@ -25,6 +25,16 @@ const OP_MASTERY_MIN_ANSWERED = 50;
 const OP_MASTERY_MIN_ACCURACY = 0.9;
 const CAPSTONE_ID = 'operations-mastered';
 
+// Speed badges — Solo mode only, a specific (pair count, time control)
+// combo, zero misses, AND the game actually finished (all pairs solved)
+// rather than the clock running out. That last condition is what
+// "under" the timer means here: beating a 30-second timer, not merely
+// having one turned on — see checkGameEndBadges's gameMeta.finishedOnTime.
+const QUICK_THINKER_PAIR_COUNT = 2;
+const QUICK_THINKER_TIME_SECONDS = 30;
+const SPEED_MASTER_PAIR_COUNT = 5;
+const SPEED_MASTER_TIME_SECONDS = 60;
+
 export const BADGE_DEFS = [
   { id: 'persistence-5',   emoji: '🌱', name: 'Getting Started', description: 'Play 5 games.' },
   { id: 'persistence-25',  emoji: '📚', name: 'Regular Player',  description: 'Play 25 games.' },
@@ -34,6 +44,8 @@ export const BADGE_DEFS = [
   { id: 'streak-10',       emoji: '🔥', name: 'On a Roll',       description: 'Reach a 10-streak in a single game.' },
   { id: 'streak-20',       emoji: '⚡', name: 'Unstoppable',     description: 'Reach a 20-streak in a single game.' },
   { id: 'beat-the-clock',  emoji: '⏱️', name: 'Beat the Clock',  description: 'Finish a game with a time control on.' },
+  { id: 'quick-thinker',   emoji: '🐇', name: 'Quick Thinker',   description: `Finish a Solo ${QUICK_THINKER_PAIR_COUNT}-fraction game with a ${QUICK_THINKER_TIME_SECONDS}-second timer and 100% accuracy.` },
+  { id: 'speed-master',    emoji: '🚀', name: 'Speed Master',    description: `Finish a Solo ${SPEED_MASTER_PAIR_COUNT}-fraction game with a ${SPEED_MASTER_TIME_SECONDS === 60 ? '1-minute' : SPEED_MASTER_TIME_SECONDS + '-second'} timer and 100% accuracy.` },
   { id: 'streak-50',       emoji: '🌟', name: 'Flawless Fifty',  description: 'Reach a 50-streak in a single game.' },
   { id: 'lifetime-1000',   emoji: '🧮', name: 'Math Machine',    description: 'Answer 1,000 questions correctly, lifetime.' },
   { id: 'accuracy-98',     emoji: '🎓', name: 'Math Whiz',       description: '98%+ accuracy over at least 200 answers.' },
@@ -67,9 +79,25 @@ function totalCorrectAndWrong(stats){
    totals) — needed for perfect-game, which is a per-game property
    `stats` alone can't tell us. `gameHadTimeControl` is likewise a
    per-game flag (was a time control on for THIS game), for the same
-   reason. Returns an array of newly-earned badge ids, in a stable/
-   sensible display order — usually empty. */
-export function checkGameEndBadges(stats, earnedBadgeIds, gameCorrectCount, gameWrongCount, gameHadTimeControl){
+   reason.
+
+   `gameMeta` (optional, defaults to {}) carries the extra per-game
+   context the two speed badges (quick-thinker/speed-master) need on
+   top of the above: `mode` ('solo'/'vs'/'computer'/'online' — speed
+   badges are Solo-only, matching how they're framed as a personal
+   speed-run rather than a race against an opponent), `totalPairs`
+   (how many fraction problems this game had), `timeControlSeconds`
+   (the exact timer length picked, e.g. 30 or 60), and `finishedOnTime`
+   (true only when the game ended by solving the last pair, NOT by the
+   clock running out — see callers: handleTimeOut() never sets this,
+   so running out of time can never accidentally earn a "beat this
+   timer" badge). Every field is optional/undefined-safe so existing
+   callers that don't pass gameMeta at all just skip the speed-badge
+   checks below rather than throwing.
+
+   Returns an array of newly-earned badge ids, in a stable/sensible
+   display order — usually empty. */
+export function checkGameEndBadges(stats, earnedBadgeIds, gameCorrectCount, gameWrongCount, gameHadTimeControl, gameMeta = {}){
   const newlyEarned = [];
   const totalGames = totalGamesPlayed(stats);
 
@@ -116,6 +144,23 @@ export function checkGameEndBadges(stats, earnedBadgeIds, gameCorrectCount, game
 
   if(gameHadTimeControl && gameCorrectCount > 0 && !earnedBadgeIds.has('beat-the-clock')){
     newlyEarned.push('beat-the-clock');
+  }
+
+  const { mode, totalPairs, timeControlSeconds, finishedOnTime } = gameMeta;
+  const isPerfectFinish = finishedOnTime && mode === 'solo' && gameCorrectCount > 0 && gameWrongCount === 0;
+
+  if(
+    isPerfectFinish && totalPairs === QUICK_THINKER_PAIR_COUNT && timeControlSeconds === QUICK_THINKER_TIME_SECONDS &&
+    !earnedBadgeIds.has('quick-thinker')
+  ){
+    newlyEarned.push('quick-thinker');
+  }
+
+  if(
+    isPerfectFinish && totalPairs === SPEED_MASTER_PAIR_COUNT && timeControlSeconds === SPEED_MASTER_TIME_SECONDS &&
+    !earnedBadgeIds.has('speed-master')
+  ){
+    newlyEarned.push('speed-master');
   }
 
   return newlyEarned;

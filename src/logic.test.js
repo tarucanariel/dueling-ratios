@@ -270,6 +270,49 @@ describe('appendSimplifyStep', () => {
     expect(cells.find((c) => c.key === 'simpNum').correct).toBe(-3);
     expect(cells.find((c) => c.key === 'simpDen').correct).toBe(4);
   });
+
+  // Regression test: a negative denominator whose sign rewrite ALONE
+  // lands the denominator on 1 (e.g. 4/-1 -> -4/1) used to be silently
+  // treated as "not reducible" — because the old check compared
+  // against the already-rewritten (post-flip) resultDen instead of
+  // the original one — so the player got the sign-rewrite row but was
+  // never actually asked for the final whole-number answer.
+  it('still asks for the final whole number when the sign rewrite alone produces one', () => {
+    const cells = [];
+    const rows = [];
+    appendSimplifyStep(cells, rows, 4, -1, 0, 1); // 4/-1 -> -4/1 -> whole number -4
+    expect(cells.find((c) => c.key === 'signNum').correct).toBe(-4);
+    expect(cells.find((c) => c.key === 'signDen').correct).toBe(1);
+    expect(cells.find((c) => c.key === 'simpWhole').correct).toBe(-4);
+    expect(cells.find((c) => c.key === 'gcf')).toBeUndefined();
+  });
+
+  it('still asks for the final whole number when both-negative rewrite alone produces one', () => {
+    const cells = [];
+    const rows = [];
+    appendSimplifyStep(cells, rows, -4, -1, 0, 1); // -4/-1 -> 4/1 -> whole number 4
+    expect(cells.find((c) => c.key === 'signNum').correct).toBe(4);
+    expect(cells.find((c) => c.key === 'signDen').correct).toBe(1);
+    expect(cells.find((c) => c.key === 'simpWhole').correct).toBe(4);
+    expect(cells.find((c) => c.key === 'gcf')).toBeUndefined();
+  });
+
+  // Regression test: the RAW result denominator can legitimately be 1
+  // straight from the arithmetic with no sign issue and no GCF
+  // involved at all — e.g. similar-fraction add/sub or multiplication
+  // when a generated denominator happens to be 1 (b = randInt(1, 9)
+  // allows exactly 1). The board still displays this as a fraction bar
+  // (N / 1), so the player still needs the final "state it as a whole
+  // number" prompt — it must not be silently skipped just because
+  // nothing needed reducing or sign-fixing.
+  it('asks for the final whole number when the RAW result denominator is already 1, no GCF or sign involved', () => {
+    const cells = [];
+    const rows = [];
+    appendSimplifyStep(cells, rows, 5, 1, 0, 1); // 5/1, straight from the raw arithmetic
+    expect(cells.find((c) => c.key === 'signNum')).toBeUndefined();
+    expect(cells.find((c) => c.key === 'gcf')).toBeUndefined();
+    expect(cells.find((c) => c.key === 'simpWhole').correct).toBe(5);
+  });
 });
 
 describe('buildProblemLayout (routing)', () => {

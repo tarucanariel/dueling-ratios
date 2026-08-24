@@ -385,7 +385,16 @@ function trackOpTally(op, isCorrect){
   else state.opTally[op].wrong += 1;
 }
 
-async function recordMyStats(mode, correctCount, wrongCount, hadTimeControl){
+/* `finishedOnTime` (default false) distinguishes "solved every pair" from
+   "the clock ran out" — see checkGameEndBadges's gameMeta doc comment.
+   Only showWinner() (the normal, all-pairs-solved finish) passes true;
+   handleTimeOut() and the online finish path both leave it false, so
+   the two speed badges can never fire for a game that was actually lost
+   to the clock. totalPairs/timeControlSeconds are read straight off
+   state rather than threaded through every call site's arguments,
+   since they're already exactly what was active for THIS just-finished
+   game by the time any recordMyStats() caller runs. */
+async function recordMyStats(mode, correctCount, wrongCount, hadTimeControl, finishedOnTime = false){
   if(!state.googleUser) return;
   const uid = state.googleUser.uid;
   try{
@@ -393,7 +402,8 @@ async function recordMyStats(mode, correctCount, wrongCount, hadTimeControl){
     const freshStats = await getPlayerStats(uid);
     state.myBadges = new Set(Object.keys(freshStats.badges || {})); // in case another tab/session earned something since our last load
     state.myStats = freshStats;
-    const newlyEarned = checkGameEndBadges(freshStats, state.myBadges, correctCount || 0, wrongCount || 0, !!hadTimeControl);
+    const gameMeta = { mode, totalPairs: state.totalPairs, timeControlSeconds: state.timeControlSeconds, finishedOnTime };
+    const newlyEarned = checkGameEndBadges(freshStats, state.myBadges, correctCount || 0, wrongCount || 0, !!hadTimeControl, gameMeta);
     await awardAndCelebrateBadges(newlyEarned);
   } catch(err){
     console.error('Failed to record game stats:', err);
@@ -4036,7 +4046,7 @@ function renderMissedReview(){
 
 function showWinner(){
   stopTimer();
-  recordMyStats(state.mode, state.players[0].correctCount, state.players[0].wrongCount, state.timeControlSeconds > 0);
+  recordMyStats(state.mode, state.players[0].correctCount, state.players[0].wrongCount, state.timeControlSeconds > 0, true);
   el.gameScreen.classList.add('hidden');
   el.winnerModal.classList.remove('hidden');
   el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);

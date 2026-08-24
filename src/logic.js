@@ -86,9 +86,20 @@ export function appendSimplifyStep(cells, rows, resultNum, resultDen, resultNumC
   }
 
   const [simpNum, simpDen] = reduce(resultNum, resultDen);
-  const reducible = simpDen !== resultDen || Math.abs(simpNum) !== Math.abs(resultNum);
-  if(!reducible) return;
 
+  // A denominator of 1 ALWAYS deserves the "restate as a whole number"
+  // ask, no matter how it got there — whether the RAW result already
+  // came out that way (e.g. similar-fraction add/sub or multiplication
+  // can legitimately produce b*d === 1 straight from the arithmetic,
+  // no sign flip or GCF involved at all), the sign rewrite above landed
+  // on it, or an actual GCF division did. The board still displays
+  // resultNum/resultDen as a fraction bar regardless of what resultDen
+  // is, so leaving a "N / 1" fraction as the final answer — never
+  // prompting the player to state it as the plain whole number N — is
+  // wrong in all three cases. This check is deliberately UNCONDITIONAL
+  // (no "did anything change" gate before it): that gate was exactly
+  // what caused the raw-already-1 and sign-only-landed-on-1 cases to
+  // be skipped.
   if(simpDen === 1){
     const idx = cells.length;
     cells.push({ key: 'simpWhole', label: 'simplified whole number', correct: simpNum });
@@ -99,6 +110,16 @@ export function appendSimplifyStep(cells, rows, resultNum, resultDen, resultNumC
     });
     return;
   }
+
+  // Below this point simpDen > 1, so the only question left is whether
+  // an ACTUAL common-factor reduction happened on top of any sign
+  // rewrite above (comparing against resultNum/resultDen as they stand
+  // AFTER that rewrite, so a sign-only change doesn't get miscounted as
+  // a magnitude reduction here). If not, the fraction was already in
+  // lowest terms (and, if applicable, the sign was already fixed above)
+  // — nothing further to ask.
+  const realReduction = simpDen !== resultDen || Math.abs(simpNum) !== Math.abs(resultNum);
+  if(!realReduction) return;
 
   const g = gcd(resultNum, resultDen); // gcd() already works on magnitudes internally
 

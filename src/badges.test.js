@@ -150,6 +150,65 @@ describe('checkGameEndBadges — per-game badges (perfect-game / beat-the-clock)
   });
 });
 
+describe('checkGameEndBadges — speed badges (quick-thinker / speed-master)', () => {
+  const perfectSoloQuickThinkerMeta = { mode: 'solo', totalPairs: 2, timeControlSeconds: 30, finishedOnTime: true };
+  const perfectSoloSpeedMasterMeta = { mode: 'solo', totalPairs: 5, timeControlSeconds: 60, finishedOnTime: true };
+
+  it('awards quick-thinker for a perfect Solo 2-fraction game finished under a 30-second timer', () => {
+    const stats = blankStats();
+    const earned = checkGameEndBadges(stats, new Set(), 2, 0, true, perfectSoloQuickThinkerMeta);
+    expect(earned).toContain('quick-thinker');
+    expect(earned).not.toContain('speed-master');
+  });
+
+  it('awards speed-master for a perfect Solo 5-fraction game finished under a 1-minute timer', () => {
+    const stats = blankStats();
+    const earned = checkGameEndBadges(stats, new Set(), 5, 0, true, perfectSoloSpeedMasterMeta);
+    expect(earned).toContain('speed-master');
+    expect(earned).not.toContain('quick-thinker');
+  });
+
+  it('never awards a speed badge if the clock ran out instead of the game finishing', () => {
+    const stats = blankStats();
+    const meta = { ...perfectSoloQuickThinkerMeta, finishedOnTime: false }; // ran out of time
+    const earned = checkGameEndBadges(stats, new Set(), 2, 0, true, meta);
+    expect(earned).not.toContain('quick-thinker');
+  });
+
+  it('never awards a speed badge if there was even one miss', () => {
+    const stats = blankStats();
+    const earned = checkGameEndBadges(stats, new Set(), 1, 1, true, perfectSoloQuickThinkerMeta);
+    expect(earned).not.toContain('quick-thinker');
+  });
+
+  it('never awards a speed badge outside Solo mode, even with matching pair count/timer/accuracy', () => {
+    const stats = blankStats();
+    const meta = { ...perfectSoloQuickThinkerMeta, mode: 'vs' };
+    const earned = checkGameEndBadges(stats, new Set(), 2, 0, true, meta);
+    expect(earned).not.toContain('quick-thinker');
+  });
+
+  it('never awards a speed badge when the pair count or timer length does not match exactly', () => {
+    const stats = blankStats();
+    expect(checkGameEndBadges(stats, new Set(), 3, 0, true, { ...perfectSoloQuickThinkerMeta, totalPairs: 3 }))
+      .not.toContain('quick-thinker'); // 3 fractions, not 2
+    expect(checkGameEndBadges(stats, new Set(), 2, 0, true, { ...perfectSoloQuickThinkerMeta, timeControlSeconds: 45 }))
+      .not.toContain('quick-thinker'); // 45s timer, not 30s
+  });
+
+  it('does not require gameMeta at all — omitting it just skips the speed-badge checks', () => {
+    const stats = blankStats();
+    expect(() => checkGameEndBadges(stats, new Set(), 2, 0, true)).not.toThrow();
+    expect(checkGameEndBadges(stats, new Set(), 2, 0, true)).not.toContain('quick-thinker');
+  });
+
+  it('never re-awards a speed badge the player already has', () => {
+    const stats = blankStats();
+    const earned = checkGameEndBadges(stats, new Set(['quick-thinker']), 2, 0, true, perfectSoloQuickThinkerMeta);
+    expect(earned).not.toContain('quick-thinker');
+  });
+});
+
 describe('checkStreakBadge', () => {
   it('fires exactly at 10, 20, and 50, and nowhere else', () => {
     expect(checkStreakBadge(9, new Set())).toBeNull();
