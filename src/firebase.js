@@ -5,7 +5,7 @@
    ========================================================= */
 
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, update, get, increment, push } from "firebase/database";
+import { getDatabase, ref, update, get, increment, push, onValue } from "firebase/database";
 import {
   getAuth, signInAnonymously, onAuthStateChanged,
   GoogleAuthProvider, signInWithPopup, signOut,
@@ -25,6 +25,42 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const db = getDatabase(app);
 export const auth = getAuth(app);
+
+/* =========================================================
+   Clock-synced "now" — for the online chess clock ONLY.
+
+   Every online turnDeadline is a raw epoch-ms timestamp, written by
+   whichever device just moved and later read back by BOTH devices
+   (`turnDeadline - now`) to figure out remaining time. If that math
+   uses each device's own `Date.now()`, the two devices' system clocks
+   don't need to be off by much — a few seconds of normal drift is
+   common — before it becomes a real bug: since the deadline for one
+   player's turn always gets *set* by whichever device made the
+   previous move, and *read* by the other device, any clock offset
+   between them leaks into the "remaining time" as a jump, in whichever
+   direction that device's clock is skewed. And because the value one
+   device computes (with its own skewed clock) gets banked and reused
+   as the base for the NEXT deadline calculation, the error doesn't
+   just sit there as a one-time display glitch — it compounds turn
+   after turn, which is what actually produced the "still counting
+   down, but net creeping upward" symptom.
+
+   The fix: anchor every online-timer calculation to the SAME clock —
+   Firebase's own server clock — instead of two independent local
+   ones. '.info/serverTimeOffset' is a special synthetic path the
+   Realtime Database SDK keeps live-updated with (serverTime -
+   deviceTime), so `Date.now() + offset` is this device's best
+   estimate of the current server time. Both host and guest computing
+   against that same reference eliminates the drift regardless of how
+   (mis)synced their actual system clocks are. */
+let serverTimeOffsetMs = 0;
+onValue(ref(db, '.info/serverTimeOffset'), (snap) => {
+  serverTimeOffsetMs = snap.val() || 0;
+});
+
+export function serverNow(){
+  return Date.now() + serverTimeOffsetMs;
+}
 
 /* Persistence: browserLocalPersistence (Firebase's own default) keeps a
    signed-in session across page reloads AND full browser restarts — this
@@ -144,9 +180,16 @@ export function watchAuthState(callback){
 // STATS_MODES/OPERATIONS now live in constants.js (a plain, side-effect-
 // free module) so badges.js can import them without pulling in the
 // Firebase SDK — re-exported here so every existing `import { STATS_MODES }
-// from './firebase.js'` elsewhere keeps working unchanged.
+// from './firebase.js'` elsewhere keeps working unchanged. Both also need
+// a LOCAL import (not just the re-export above) because `export { X }
+// from 'mod'` only forwards X to other files that import it from here —
+// it does not bind X inside this file's own scope. STATS_MODES.forEach()
+// below was relying on a binding that never actually existed, throwing
+// "STATS_MODES is not defined" the moment anyone opened My Stats/My
+// Classes (both call getPlayerStats()). OPERATIONS happened to work only
+// because it already had its own separate local import.
 export { STATS_MODES, OPERATIONS } from './constants.js';
-import { OPERATIONS } from './constants.js';
+import { STATS_MODES, OPERATIONS } from './constants.js';
 
 // Firebase Realtime Database paths can't contain '.', '#', '$', '[', ']',
 // or '/' — none of our operation symbols hit that, but '÷' and '×' are

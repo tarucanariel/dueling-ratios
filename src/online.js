@@ -56,7 +56,7 @@
    ========================================================= */
 
 import { ref, set, get, update, remove, onValue, off, onDisconnect, serverTimestamp, runTransaction } from "firebase/database";
-import { db, ensureSignedIn } from "./firebase.js";
+import { db, ensureSignedIn, serverNow } from "./firebase.js";
 import { generateProblem, buildProblemLayout, buildPool } from "./logic.js";
 
 // No 0/O or 1/I — easy to read aloud/type on a shared classroom code.
@@ -183,7 +183,7 @@ export async function joinRoom(code, guestName){
     // Start the clock now — not at room creation, so the host waiting
     // alone for someone to join doesn't silently burn their own time.
     if(room.settings?.timeControlSeconds > 0){
-      room.turnDeadline = Date.now() + room.timeRemaining.host * 1000; // turn starts with host
+      room.turnDeadline = serverNow() + room.timeRemaining.host * 1000; // turn starts with host
     }
 
     return room;
@@ -292,7 +292,7 @@ export async function acceptChallenge(code, requestId){
     room.pendingChallenge = null;
     room.lastActivityAt = Date.now();
     if(room.settings?.timeControlSeconds > 0){
-      room.turnDeadline = Date.now() + room.timeRemaining.host * 1000;
+      room.turnDeadline = serverNow() + room.timeRemaining.host * 1000;
     }
     return room;
   });
@@ -515,7 +515,7 @@ export async function resetRoomForRematch(code, settings){
     cellIndex: 0,
     pool,
     timeRemaining: { host: t, guest: t },
-    turnDeadline: t > 0 ? Date.now() + t * 1000 : null,
+    turnDeadline: t > 0 ? serverNow() + t * 1000 : null,
     missLog: [],
     rematch: { host: false, guest: false },
     pendingChallenge: null,

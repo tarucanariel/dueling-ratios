@@ -182,10 +182,10 @@ describe('buildDivisionLayout (a/b \u00F7 c/d = a/b \u00D7 d/c)', () => {
     const { cells } = buildDivisionLayout({ a: -1, b: 2, c: -1, d: 4 });
     expect(cells.find((c) => c.key === 'resultNum').correct).toBe(-4);
     expect(cells.find((c) => c.key === 'resultDen').correct).toBe(-2);
-    const posNum = cells.find((c) => c.key === 'posNum');
-    const posDen = cells.find((c) => c.key === 'posDen');
-    expect(posNum.correct).toBe(4);
-    expect(posDen.correct).toBe(2);
+    const signNum = cells.find((c) => c.key === 'signNum');
+    const signDen = cells.find((c) => c.key === 'signDen');
+    expect(signNum.correct).toBe(4);
+    expect(signDen.correct).toBe(2);
     expect(cells.find((c) => c.key === 'simpWhole').correct).toBe(2); // 4/2 reduces to the whole number 2
   });
 });
@@ -233,6 +233,42 @@ describe('appendSimplifyStep', () => {
     expect(cells.find((c) => c.key === 'gcf').correct).toBe(2);
     expect(cells.find((c) => c.key === 'simpNum').correct).toBe(1);
     expect(cells.find((c) => c.key === 'simpDen').correct).toBe(6);
+  });
+
+  // Regression test: a result that's already in lowest terms in
+  // magnitude (GCF 1) but landed with a negative denominator (e.g.
+  // 3/-4) used to fall straight into the GCF/divide-by-GCF flow,
+  // ask for a GCF of 1, "divide" 3/1 and -4/1 (still negative-over-
+  // positive), and then expect the final blanks to be -3/4 anyway —
+  // a mismatch between what the "divide by the GCF" row showed and
+  // what the final answer cells required. It should instead just ask
+  // for the sign rewrite, with no separate GCF step, since there's
+  // nothing left to divide out.
+  it('rewrites a negative denominator with no real GCF as a sign fix, not a GCF step', () => {
+    const cells = [];
+    const rows = [];
+    appendSimplifyStep(cells, rows, 3, -4, 0, 1); // 3/-4, already lowest terms in magnitude
+    expect(cells.find((c) => c.key === 'gcf')).toBeUndefined(); // GCF of 1 isn't a real simplify step
+    const signNum = cells.find((c) => c.key === 'signNum');
+    const signDen = cells.find((c) => c.key === 'signDen');
+    expect(signNum.correct).toBe(-3);
+    expect(signDen.correct).toBe(4);
+    // No further "simplified numerator/denominator" row — the sign
+    // rewrite cells above ARE the final answer.
+    expect(cells.find((c) => c.key === 'simpNum')).toBeUndefined();
+  });
+
+  it('rewrites a negative denominator AND divides out a real GCF, staying consistent', () => {
+    const cells = [];
+    const rows = [];
+    appendSimplifyStep(cells, rows, 6, -8, 0, 1); // 6/-8 -> -3/4, GCF 2
+    const signNum = cells.find((c) => c.key === 'signNum');
+    const signDen = cells.find((c) => c.key === 'signDen');
+    expect(signNum.correct).toBe(-6);
+    expect(signDen.correct).toBe(8);
+    expect(cells.find((c) => c.key === 'gcf').correct).toBe(2);
+    expect(cells.find((c) => c.key === 'simpNum').correct).toBe(-3);
+    expect(cells.find((c) => c.key === 'simpDen').correct).toBe(4);
   });
 });
 

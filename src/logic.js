@@ -45,30 +45,44 @@ export function randInt(min, max){
        and only then the two real blanks for the simplified result,
        exactly as before. */
 export function appendSimplifyStep(cells, rows, resultNum, resultDen, resultNumCellIndex, resultDenCellIndex){
-  // Division can land on a result that's negative-over-negative (e.g. a
-  // negative numerator divided by a negative-flipped numerator). That's
-  // mathematically fine but shouldn't go straight into GCF/simplify — we
-  // first ask for the equivalent positive fraction (two new tap points),
-  // then treat THAT as the basis for GCF/simplify below.
-  if(resultNum < 0 && resultDen < 0){
-    const posNum = -resultNum;
-    const posDen = -resultDen;
+  // A negative denominator — whether from negative-over-negative (e.g.
+  // a negative numerator divided by a negative-flipped denominator) or
+  // just a lone negative sign that landed on the denominator — isn't
+  // itself a GCF/simplify matter; it's a sign-convention rewrite
+  // (negative sign belongs on the numerator, denominator stays
+  // positive). That rewrite has to happen FIRST, and resultNum/resultDen
+  // (and their cell indices) have to be updated to the rewritten values
+  // before any reduce()/gcd() below, precisely because reduce() itself
+  // performs this same sign flip internally. If it didn't happen here
+  // first, the later "Divide both by the GCF" row would keep displaying
+  // the original (wrong-sign) numbers being divided, while the final
+  // "simplified numerator/denominator" blanks — sourced from reduce(),
+  // which already flips the sign — would expect the corrected ones.
+  // That mismatch is exactly what made an already-lowest-terms fraction
+  // with a negative denominator ask for a GCF of 1 and then, having
+  // added nothing, still demand a sign flip the "divide by GCF" row
+  // never actually showed.
+  if(resultDen < 0){
+    const flippedNum = -resultNum;
+    const flippedDen = -resultDen;
 
-    const posNumIdx = cells.length;
-    cells.push({ key: 'posNum', label: 'positive numerator', correct: posNum });
-    const posDenIdx = cells.length;
-    cells.push({ key: 'posDen', label: 'positive denominator', correct: posDen });
+    const flippedNumIdx = cells.length;
+    cells.push({ key: 'signNum', label: 'numerator with a positive denominator', correct: flippedNum });
+    const flippedDenIdx = cells.length;
+    cells.push({ key: 'signDen', label: 'positive denominator', correct: flippedDen });
 
     rows.push({
-      caption: 'Both negative \u2014 rewrite as a positive fraction',
-      numerator: [ { type: 'cell', cellIndex: posNumIdx } ],
-      denominator: [ { type: 'cell', cellIndex: posDenIdx } ],
+      caption: resultNum < 0
+        ? 'Both negative \u2014 rewrite as a positive fraction'
+        : 'Negative denominator \u2014 rewrite with a positive denominator',
+      numerator: [ { type: 'cell', cellIndex: flippedNumIdx } ],
+      denominator: [ { type: 'cell', cellIndex: flippedDenIdx } ],
     });
 
-    resultNum = posNum;
-    resultDen = posDen;
-    resultNumCellIndex = posNumIdx;
-    resultDenCellIndex = posDenIdx;
+    resultNum = flippedNum;
+    resultDen = flippedDen;
+    resultNumCellIndex = flippedNumIdx;
+    resultDenCellIndex = flippedDenIdx;
   }
 
   const [simpNum, simpDen] = reduce(resultNum, resultDen);

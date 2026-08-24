@@ -3,7 +3,7 @@ import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
-import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect } from './firebase.js';
+import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound } from './sounds.js';
@@ -2258,7 +2258,7 @@ function onRoomUpdate(room){
 
   if(room.status === 'active'){
     if(timerOn && !opponentConnected && prevOpponentConnected && room.turnDeadline){
-      const bankedActive = Math.max(0, (room.turnDeadline - Date.now()) / 1000);
+      const bankedActive = Math.max(0, (room.turnDeadline - serverNow()) / 1000);
       const activeRole = room.turn;
       submitRoomUpdate(state.roomCode, {
         timeRemaining: {
@@ -2270,7 +2270,7 @@ function onRoomUpdate(room){
     } else if(timerOn && opponentConnected && !prevOpponentConnected && !room.turnDeadline){
       const activeRole = room.turn;
       submitRoomUpdate(state.roomCode, {
-        turnDeadline: Date.now() + (room.timeRemaining[activeRole] || 0) * 1000,
+        turnDeadline: serverNow() + (room.timeRemaining[activeRole] || 0) * 1000,
       }).catch(() => {});
     }
 
@@ -2429,7 +2429,7 @@ function handleOnlineTileClick(tileId){
   // Rotate the chess clock: bank however much time I (the player who just
   // acted) had left, then start a fresh deadline for whoever's turn is next.
   if(state.room.settings.timeControlSeconds > 0 && state.room.turnDeadline){
-    const now = Date.now();
+    const now = serverNow();
     const myRemaining = Math.max(0, (state.room.turnDeadline - now) / 1000);
     updates[`timeRemaining/${myKey}`] = myRemaining;
     const otherRemaining = state.room.timeRemaining[otherKey];
@@ -2600,7 +2600,7 @@ function tickOnlineTimer(){
   checkOnlineTimeout();
   if(!state.room || state.room.status !== 'active') return; // may have just finished
 
-  const now = Date.now();
+  const now = serverNow();
   const activeRole = room.turn;
   const inactiveRole = activeRole === 'host' ? 'guest' : 'host';
   const activeRemaining = Math.max(0, Math.ceil((room.turnDeadline - now) / 1000));
@@ -2621,7 +2621,7 @@ function tickOnlineTimer(){
 function checkOnlineTimeout(){
   const room = state.room;
   if(!room || room.status !== 'active' || !room.turnDeadline) return;
-  if(Date.now() < room.turnDeadline) return;
+  if(serverNow() < room.turnDeadline) return;
 
   const timedOutRole = room.turn;
   submitRoomUpdate(state.roomCode, {
@@ -3034,7 +3034,7 @@ function tickSpectatorTimer(){
   const room = state.spectateRoom;
   if(!room || room.status !== 'active' || !room.turnDeadline) return;
 
-  const now = Date.now();
+  const now = serverNow();
   const activeRole = room.turn;
   const inactiveRole = activeRole === 'host' ? 'guest' : 'host';
   const activeRemaining = Math.max(0, Math.ceil((room.turnDeadline - now) / 1000));
