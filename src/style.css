@@ -2083,6 +2083,36 @@ body{
   background:radial-gradient(circle at 50% 50%, rgba(255,23,68,0.6) 0%, rgba(20,0,0,0.5) 55%, rgba(0,0,0,0) 100%);
 }
 
+/* Bankai's game-start flourish — spawned by spawnBankaiPowerUpCard()
+   in main.js. A higher z-index than every other Bankai flourish above
+   (999) since this one is a full "moment", not a background accent —
+   it should sit above literally everything, including a freshly
+   rendered game board, for its brief life. */
+.bankai-powerup-card{
+  position:fixed;
+  inset:0;
+  z-index:1000;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  pointer-events:none;
+  background:radial-gradient(circle at 50% 50%, rgba(40,0,0,0.55) 0%, rgba(0,0,0,0.78) 75%);
+}
+
+.bankai-powerup-text{
+  font-family:'Inter', sans-serif;
+  font-weight:800;
+  font-size:clamp(2rem, 9vw, 4.2rem);
+  letter-spacing:0.1em;
+  text-transform:uppercase;
+  color:#fff5f5;
+  text-shadow:
+    0 0 14px rgba(255,23,68,0.95),
+    0 0 34px rgba(255,23,68,0.75),
+    0 0 64px rgba(255,23,68,0.5);
+  white-space:nowrap;
+}
+
 /* =========================================================
    Effect board themes — a persistent, ambient visual on the whole
    problem strip + tile pool for whichever effect is equipped, so it

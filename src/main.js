@@ -1649,7 +1649,7 @@ function tryStartGame(){
   el.setupModal.classList.add('hidden');
   el.gameScreen.classList.remove('hidden');
 
-  playStartSound(activeTileEffectId());
+  announceGameStart(activeTileEffectId());
   startNextPair();
   if(timerOn) startTimer();
 }
@@ -2177,7 +2177,7 @@ function onRoomUpdate(room){
   // their own listener, so diffing prev-vs-new here fires them identically
   // for host and guest, regardless of which one triggered the change.
   const prevGuestPresent = !!prevRoom?.players?.guest;
-  if(!prevGuestPresent && guestP) playStartSound(activeTileEffectId());
+  if(!prevGuestPresent && guestP) announceGameStart(activeTileEffectId());
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished'){
     playSound('winner');
@@ -2317,7 +2317,7 @@ function onRoomUpdate(room){
   // rematch flips it back from 'finished', so make sure the winner modal
   // and its rematch UI don't linger on top of the fresh game screen.
   if(isFreshGameStart && prevRoom?.status === 'finished'){
-    playStartSound(activeTileEffectId());
+    announceGameStart(activeTileEffectId());
   }
   el.winnerModal.classList.add('hidden');
   el.rematchStatus.classList.add('hidden');
@@ -2745,7 +2745,7 @@ function rematchLocal(){
   el.chipP2Timer.classList.toggle('hidden', !timerOn || !(state.mode === 'vs' || state.mode === 'computer'));
 
   el.gameScreen.classList.remove('hidden');
-  playStartSound(activeTileEffectId());
+  announceGameStart(activeTileEffectId());
   startNextPair();
   if(timerOn) startTimer();
 }
@@ -2939,7 +2939,7 @@ function renderSpectatorRoom(room){
   state.currentPlayer = room.turn === 'host' ? 0 : 1;
 
   const prevGuestPresent = !!prevRoom?.players?.guest;
-  if(!prevGuestPresent && guestP) playStartSound(activeTileEffectId());
+  if(!prevGuestPresent && guestP) announceGameStart(activeTileEffectId());
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
   // Unlike onRoomUpdate's version of this same check, a spectator has
@@ -3275,6 +3275,19 @@ function activeTileEffectId(){
   return isTileEffectUnlocked(state.myEquippedEffect) ? state.myEquippedEffect : 'classic';
 }
 
+/* Every "a game just began" moment — local start, local rematch, and
+   the three online room-sync equivalents — routes through here rather
+   than calling playStartSound() directly, so the start sound and
+   Bankai's power-up flash card (spawnBankaiPowerUpCard() below) always
+   stay in sync instead of needing to be triggered from two separate
+   places that could drift apart later. Every other effect (including
+   'classic') just gets the sound, unchanged — the flash card is
+   Bankai-only. */
+function announceGameStart(effectId){
+  playStartSound(effectId);
+  if(effectId === 'bankai') spawnBankaiPowerUpCard();
+}
+
 /* Applies a persistent, ambient board theme (border glow, background
    shimmer, etc. — all in CSS, see .effect-theme-* rules) matching the
    equipped tile effect to the whole problem strip + tile pool, not
@@ -3605,6 +3618,42 @@ function spawnBankaiFlames(startX, startY, dx, dy, totalDuration){
       anim.onfinish = () => flame.remove();
     }, t * totalDuration);
   });
+}
+
+/* Bankai's game-start flourish — a half-second "power-up" flash card
+   announcing BANKAI the instant a game begins with it equipped, called
+   from announceGameStart() above (never directly) so it always fires
+   alongside the custom start sound rather than drifting out of sync
+   with it. Purely decorative: covers the full viewport, ignores clicks,
+   and removes itself once its own animation finishes — nothing here
+   blocks or delays the game screen underneath it. */
+function spawnBankaiPowerUpCard(){
+  const card = document.createElement('div');
+  card.className = 'bankai-powerup-card';
+  card.innerHTML = '<span class="bankai-powerup-text">\uD83D\uDDE1\uFE0F BANKAI \uD83D\uDDE1\uFE0F</span>';
+  document.body.appendChild(card);
+
+  const anim = card.animate([
+    { opacity: 0, offset: 0 },
+    { opacity: 1, offset: 0.08 },
+    { opacity: 1, offset: 0.75 },
+    { opacity: 0, offset: 1 },
+  ], { duration: 850, easing: 'ease-out' });
+
+  // The backdrop fades in/out (above) while the text itself gets its
+  // own punchier "power-up" motion: a fast overshoot zoom-in that
+  // settles, a brief hold, then a small final flare — animated
+  // separately from the backdrop so the text reads as the thing doing
+  // the work, not just fading in place with everything else.
+  card.querySelector('.bankai-powerup-text').animate([
+    { transform: 'scale(0.4)', filter: 'brightness(2.2)', offset: 0 },
+    { transform: 'scale(1.18)', filter: 'brightness(1.5)', offset: 0.2 },
+    { transform: 'scale(1)', filter: 'brightness(1)', offset: 0.42 },
+    { transform: 'scale(1)', filter: 'brightness(1)', offset: 0.85 },
+    { transform: 'scale(1.06)', filter: 'brightness(1.3)', offset: 1 },
+  ], { duration: 850, easing: 'ease-out' });
+
+  anim.onfinish = () => card.remove();
 }
 
 /* Bankai's landing flourish — a sharp, full-viewport red flash the
