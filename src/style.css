@@ -2113,6 +2113,50 @@ body{
   white-space:nowrap;
 }
 
+/* Gear 5's landing flourish — spawned by spawnGear5Burst() in
+   main.js. A mix of star/sparkle glyphs rather than a solid shape
+   (unlike .confetti-piece), so no fixed size/background is needed
+   here — each piece just needs to render its emoji large enough to
+   read clearly mid-bounce. */
+.gear5-star{
+  position:fixed;
+  z-index:999;
+  font-size:1.3rem;
+  line-height:1;
+  pointer-events:none;
+  filter:drop-shadow(0 0 8px rgba(255,213,74,0.85));
+}
+
+/* Gear 5's game-start flourish — spawned by spawnGear5PowerUpCard() in
+   main.js. Same full-viewport "moment" treatment as Bankai's card,
+   but a bright white-gold backdrop instead of a dark red one, so the
+   two capstone effects read as opposites (radiant/playful vs.
+   dark/intense) even before the text itself is legible. */
+.gear5-powerup-card{
+  position:fixed;
+  inset:0;
+  z-index:1000;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  pointer-events:none;
+  background:radial-gradient(circle at 50% 50%, rgba(255,213,74,0.35) 0%, rgba(20,16,0,0.72) 75%);
+}
+
+.gear5-powerup-text{
+  font-family:'Inter', sans-serif;
+  font-weight:800;
+  font-size:clamp(2rem, 9vw, 4.2rem);
+  letter-spacing:0.1em;
+  text-transform:uppercase;
+  color:#fffdf5;
+  text-shadow:
+    0 0 14px rgba(255,213,74,0.95),
+    0 0 34px rgba(255,213,74,0.75),
+    0 0 64px rgba(255,243,196,0.55);
+  white-space:nowrap;
+}
+
 /* =========================================================
    Effect board themes — a persistent, ambient visual on the whole
    problem strip + tile pool for whichever effect is equipped, so it
@@ -2237,6 +2281,28 @@ body{
 @keyframes board-bankai-pulse{
   0%, 100%{ box-shadow:0 0 0 2px rgba(255,23,68,0.4), 0 0 14px rgba(255,23,68,0.22); }
   50%{ box-shadow:0 0 0 2px rgba(255,23,68,0.9), 0 0 38px rgba(255,23,68,0.65); }
+}
+
+/* Gear 5 — the roster's other two-badge capstone, deliberately styled
+   as Bankai's tonal opposite: a bright warm-white background tint
+   instead of a dark one, gold rather than red, and a slight rotation
+   wobble layered on top of the box-shadow pulse (board-gear5-wobble)
+   instead of a pure glow pulse — the ambient board itself gets a
+   little of the same "goofy overshoot" energy the flight animation
+   and landing burst already have, not just a static glow. */
+.effect-theme-gear-5 .problem-strip,
+.effect-theme-gear-5 .pool-tray{
+  padding:14px;
+  border-radius:16px;
+  background-color:rgba(255,213,74,0.1);
+  animation:board-gear5-wobble 2.2s ease-in-out infinite;
+}
+
+@keyframes board-gear5-wobble{
+  0%, 100%{ transform:rotate(0deg); box-shadow:0 0 0 2px rgba(255,213,74,0.45), 0 0 14px rgba(255,213,74,0.25); }
+  25%{ transform:rotate(-0.6deg); box-shadow:0 0 0 2px rgba(255,213,74,0.65), 0 0 22px rgba(255,213,74,0.4); }
+  50%{ transform:rotate(0.4deg); box-shadow:0 0 0 2px rgba(255,243,196,0.85), 0 0 32px rgba(255,213,74,0.55); }
+  75%{ transform:rotate(-0.3deg); box-shadow:0 0 0 2px rgba(255,213,74,0.65), 0 0 22px rgba(255,213,74,0.4); }
 }
 
 .feedback-line{

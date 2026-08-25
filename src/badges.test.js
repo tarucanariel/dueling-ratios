@@ -210,12 +210,12 @@ describe('checkGameEndBadges — speed badges (quick-thinker / speed-master)', (
 });
 
 describe('checkStreakBadge', () => {
-  it('fires exactly at 10, 20, and 50, and nowhere else', () => {
+  it('fires exactly at 10, 20, and 40, and nowhere else', () => {
     expect(checkStreakBadge(9, new Set())).toBeNull();
     expect(checkStreakBadge(10, new Set())).toBe('streak-10');
     expect(checkStreakBadge(11, new Set())).toBeNull();
     expect(checkStreakBadge(20, new Set())).toBe('streak-20');
-    expect(checkStreakBadge(50, new Set())).toBe('streak-50');
+    expect(checkStreakBadge(40, new Set())).toBe('streak-40');
   });
 
   it('does not re-fire an already-earned streak badge', () => {

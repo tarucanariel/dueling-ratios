@@ -46,7 +46,7 @@ export const BADGE_DEFS = [
   { id: 'beat-the-clock',  emoji: '⏱️', name: 'Beat the Clock',  description: 'Finish a game with a time control on.' },
   { id: 'quick-thinker',   emoji: '🐇', name: 'Quick Thinker',   description: `Finish a Solo ${QUICK_THINKER_PAIR_COUNT}-fraction game with a ${QUICK_THINKER_TIME_SECONDS}-second timer and 100% accuracy.` },
   { id: 'speed-master',    emoji: '🚀', name: 'Speed Master',    description: `Finish a Solo ${SPEED_MASTER_PAIR_COUNT}-fraction game with a ${SPEED_MASTER_TIME_SECONDS === 60 ? '1-minute' : SPEED_MASTER_TIME_SECONDS + '-second'} timer and 100% accuracy.` },
-  { id: 'streak-50',       emoji: '🌟', name: 'Flawless Fifty',  description: 'Reach a 50-streak in a single game.' },
+  { id: 'streak-40',       emoji: '🌟', name: 'Flawless Forty',  description: 'Reach a 40-streak in a single game.' },
   { id: 'lifetime-1000',   emoji: '🧮', name: 'Math Machine',    description: 'Answer 1,000 questions correctly, lifetime.' },
   { id: 'accuracy-98',     emoji: '🎓', name: 'Math Whiz',       description: '98%+ accuracy over at least 200 answers.' },
   { id: 'addition-mastery',       emoji: '➕', name: 'Addition Ace',         description: `90%+ accuracy over at least ${OP_MASTERY_MIN_ANSWERED} addition answers, lifetime.` },
@@ -170,14 +170,14 @@ export function checkGameEndBadges(stats, earnedBadgeIds, gameCorrectCount, game
    detected (see isStreakMilestone/streakTierFor in main.js) — passed
    the player's current streak count. Exact-equality checks are safe
    here (not >=) since a streak only ever increments by 1, so play
-   always passes through exactly 10, 20, and 50 on the way past them;
+   always passes through exactly 10, 20, and 40 on the way past them;
    no risk of "jumping over" a threshold. Returns a single badge id or
    null — at most one badge can newly trigger per streak increment,
-   since 10/20/50 can't all be hit by the same +1 step. */
+   since 10/20/40 can't all be hit by the same +1 step. */
 export function checkStreakBadge(streakCount, earnedBadgeIds){
   if(streakCount === 10 && !earnedBadgeIds.has('streak-10')) return 'streak-10';
   if(streakCount === 20 && !earnedBadgeIds.has('streak-20')) return 'streak-20';
-  if(streakCount === 50 && !earnedBadgeIds.has('streak-50')) return 'streak-50';
+  if(streakCount === 40 && !earnedBadgeIds.has('streak-40')) return 'streak-40';
   return null;
 }
 
@@ -192,7 +192,7 @@ export function checkStreakBadge(streakCount, earnedBadgeIds){
    (persistence-*, sharpshooter, accuracy-98, lifetime-1000, and the
    4 operation-mastery badges) — every one of them is driven by a
    running total this file already reads off `stats`. The streak
-   badges (10/20/50), the per-game ones (perfect-game, beat-the-clock),
+   badges (10/20/40), the per-game ones (perfect-game, beat-the-clock),
    and the operations-mastered capstone are left out on purpose: each
    is either instant/event-based or itself a compound of other badges
    rather than a running count, so there's no meaningful "62% of the

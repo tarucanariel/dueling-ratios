@@ -7,6 +7,7 @@ import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, ST
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound } from './sounds.js';
+import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 
 /* =========================================================
@@ -3247,22 +3248,17 @@ function syncPoolLockState(){
    the animation — see playCorrectSound() in sounds.js, keyed off this
    same id so there's one unlock/one picker for both. Same turn-scoping
    applies: the call sites below resolve 'classic' instead of the real
-   effect id whenever it isn't actually this player's own turn. */
-const TILE_EFFECTS = [
-  { id: 'classic',        name: 'Classic Arc',     icon: '\uD83C\uDFF9', unlockBadgeId: null },
-  { id: 'bounce-drop',    name: 'Bounce Drop',     icon: '\uD83C\uDFC0', unlockBadgeId: 'persistence-5' },
-  { id: 'spin-toss',      name: 'Spin Toss',       icon: '\uD83C\uDF00', unlockBadgeId: 'streak-10' },
-  { id: 'warp-zoom',      name: 'Warp Zoom',       icon: '\u26A1', unlockBadgeId: 'sharpshooter' },
-  { id: 'confetti-burst', name: 'Confetti Burst',  icon: '\uD83C\uDF89', unlockBadgeId: 'streak-20' },
-  { id: 'sparkle-trail',  name: 'Sparkle Trail',   icon: '\u2728', unlockBadgeId: 'operations-mastered' },
-  { id: 'bankai',         name: 'Bankai',          icon: '\uD83D\uDDE1\uFE0F', unlockBadgeId: 'speed-master' },
-];
-const TILE_EFFECTS_BY_ID = Object.fromEntries(TILE_EFFECTS.map((e) => [e.id, e]));
+   effect id whenever it isn't actually this player's own turn.
 
+   unlockBadgeIds is a list rather than a single id so an effect can
+   require more than one badge at once (see 'gear-5' in tileEffects.js,
+   the first effect gated on two badges together rather than one) —
+   the roster itself and the pure "is this unlocked" check now live in
+   tileEffects.js (no DOM/state there, so it's actually testable);
+   this local wrapper just supplies state.myBadges as the earned-badge
+   set every call site here already expects to pass implicitly. */
 function isTileEffectUnlocked(effectId){
-  const effect = TILE_EFFECTS_BY_ID[effectId];
-  if(!effect) return false;
-  return !effect.unlockBadgeId || state.myBadges.has(effect.unlockBadgeId);
+  return isTileEffectUnlockedFor(effectId, state.myBadges);
 }
 
 /* The effect actually in play right now — falls back to 'classic' if
@@ -3282,10 +3278,11 @@ function activeTileEffectId(){
    stay in sync instead of needing to be triggered from two separate
    places that could drift apart later. Every other effect (including
    'classic') just gets the sound, unchanged — the flash card is
-   Bankai-only. */
+   Bankai/Gear 5-only. */
 function announceGameStart(effectId){
   playStartSound(effectId);
   if(effectId === 'bankai') spawnBankaiPowerUpCard();
+  if(effectId === 'gear-5') spawnGear5PowerUpCard();
 }
 
 /* Applies a persistent, ambient board theme (border glow, background
@@ -3334,8 +3331,15 @@ function renderMyStatsEffects(){
   TILE_EFFECTS.forEach((effect) => {
     const unlocked = isTileEffectUnlocked(effect.id);
     const equipped = unlocked && activeTileEffectId() === effect.id;
-    const badgeDef = effect.unlockBadgeId ? BADGE_DEFS_BY_ID[effect.unlockBadgeId] : null;
-    const description = badgeDef ? `Unlocked by ${badgeDef.emoji} ${badgeDef.name}.` : 'Always available.';
+    // Join every required badge's "emoji Name" — for the common
+    // single-badge case this is just one, but gear-5 needs both
+    // listed together ("Unlocked by 🌟 Flawless Forty and 🧠 Fraction
+    // Champion.") so a player can see the full requirement at a glance
+    // rather than only one half of it.
+    const badgeDefs = effect.unlockBadgeIds.map((id) => BADGE_DEFS_BY_ID[id]).filter(Boolean);
+    const description = badgeDefs.length
+      ? `Unlocked by ${badgeDefs.map((b) => `${b.emoji} ${b.name}`).join(' and ')}.`
+      : 'Always available.';
     const tooltipDef = { emoji: effect.icon, name: effect.name, description };
 
     const btn = document.createElement('button');
@@ -3489,6 +3493,25 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     ];
     duration = 300; // fastest flight of any effect — blade-fast, not floaty
     easing = 'cubic-bezier(0.6, 0.02, 0.85, 0.4)'; // sharp whip-crack acceleration, not a gentle ease
+  } else if(effectId === 'gear-5'){
+    // Gear 5 is the tonal opposite of Bankai on purpose: where Bankai
+    // is one sharp, controlled line, this is a rubbery, overshooting
+    // wobble — squash-and-stretch scaleX/scaleY fighting each other
+    // and a rotation that swings past 0 and back rather than settling
+    // in one direction, reading as chaotic/comedic bounce rather than
+    // raw power. Glow is white-gold (drop-shadow #ffd54a) instead of
+    // Bankai's red, echoing the "sun god" palette without borrowing
+    // its moodiness.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1,1) rotate(0deg)', filter: 'brightness(1) drop-shadow(0 0 0px #ffd54a)', opacity: 1, offset: 0 },
+      { transform: `translate(${dx * 0.18}px, ${dy * 0.18 - 50}px) scale(1.35,0.7) rotate(-18deg)`, filter: 'brightness(1.5) drop-shadow(0 0 10px #ffd54a)', opacity: 1, offset: 0.22 },
+      { transform: `translate(${dx * 0.42}px, ${dy * 0.42 - 70}px) scale(0.68,1.4) rotate(22deg)`, filter: 'brightness(1.8) drop-shadow(0 0 18px #fff3c4)', opacity: 1, offset: 0.44 },
+      { transform: `translate(${dx * 0.7}px, ${dy * 0.7 - 20}px) scale(1.28,0.78) rotate(-14deg)`, filter: 'brightness(2) drop-shadow(0 0 22px #ffd54a)', opacity: 1, offset: 0.66 },
+      { transform: `translate(${dx * 0.92}px, ${dy * 0.92}px) scale(0.8,1.25) rotate(10deg)`, filter: 'brightness(2.2) drop-shadow(0 0 20px #fff3c4)', opacity: 1, offset: 0.85 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.05,0.05) rotate(0deg)`, filter: 'brightness(2.2) drop-shadow(0 0 0px #ffd54a)', opacity: 0, offset: 1 },
+    ];
+    duration = 460; // slowest flight of any effect — a bouncy wander, not a straight shot
+    easing = 'ease-in-out';
   } else { // 'classic' (also the fallback for any unrecognized effect id)
     keyframes = [
       { transform: 'translate(0,0) scale(1)', offset: 0 },
@@ -3521,6 +3544,10 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     const startY = startRect.top + startRect.height / 2;
     spawnBankaiFlames(startX, startY, dx, dy, duration);
     anim.onfinish = () => { clone.remove(); spawnBankaiFlash(); };
+  } else if(effectId === 'gear-5'){
+    const landX = endRect.left + endRect.width / 2;
+    const landY = endRect.top + endRect.height / 2;
+    anim.onfinish = () => { clone.remove(); spawnGear5Burst(landX, landY); };
   }
 }
 
@@ -3671,6 +3698,75 @@ function spawnBankaiFlash(){
     { opacity: 0, offset: 1 },
   ], { duration: 260, easing: 'ease-out' });
   anim.onfinish = () => flash.remove();
+}
+
+/* Gear 5's landing flourish — a handful of star/sparkle glyphs "boing"
+   outward from the landing point on a bouncy elastic easing (the CSS
+   equivalent of a squash-and-stretch cartoon bounce), rather than the
+   steady outward drift Confetti Burst's pieces use. Mixed glyphs
+   (⭐ 💫 ✨) in white/gold read as a playful comedic "bonk" rather
+   than a single uniform particle type, matching the exaggerated-wobble
+   tone the flight animation above already sets. */
+function spawnGear5Burst(x, y){
+  const glyphs = ['\u2B50', '\uD83D\uDCAB', '\u2728'];
+  const count = 12;
+  for(let i = 0; i < count; i++){
+    const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
+    const distance = 34 + Math.random() * 34;
+    const px = Math.cos(angle) * distance;
+    const py = Math.sin(angle) * distance - 8; // a slight upward bias — bouncing, not falling
+    const spin = (Math.random() > 0.5 ? 1 : -1) * (90 + Math.random() * 180);
+
+    const piece = document.createElement('div');
+    piece.className = 'gear5-star';
+    piece.textContent = glyphs[i % glyphs.length];
+    piece.style.left = `${x}px`;
+    piece.style.top = `${y}px`;
+    document.body.appendChild(piece);
+
+    // The elastic-ish overshoot (0.55 offset shoots past the final
+    // spot, 0.8 settles back in) is what gives this its "boing" feel
+    // instead of Confetti Burst's single steady outward ease-out.
+    const anim = piece.animate([
+      { transform: 'translate(-50%,-50%) translate(0,0) scale(0.4) rotate(0deg)', opacity: 1, offset: 0 },
+      { transform: `translate(-50%,-50%) translate(${px * 1.15}px, ${py * 1.15}px) scale(1.3) rotate(${spin * 0.7}deg)`, opacity: 1, offset: 0.55 },
+      { transform: `translate(-50%,-50%) translate(${px}px, ${py}px) scale(0.9) rotate(${spin}deg)`, opacity: 0, offset: 1 },
+    ], { duration: 560 + Math.random() * 160, easing: 'ease-out' });
+    anim.onfinish = () => piece.remove();
+  }
+}
+
+/* Gear 5's game-start flourish — same "half-second announcement card"
+   pattern as spawnBankaiPowerUpCard() above, called from
+   announceGameStart() so it stays in lockstep with the start sound.
+   The text itself wobbles side-to-side while it holds (see the
+   rotate() keyframes below) rather than Bankai's fast zoom-then-flare,
+   echoing the same chaotic/bouncy tone as the flight animation and
+   landing burst instead of a sharp power-up beat. */
+function spawnGear5PowerUpCard(){
+  const card = document.createElement('div');
+  card.className = 'gear5-powerup-card';
+  card.innerHTML = '<span class="gear5-powerup-text">\uD83C\uDF1E GEAR 5 \uD83C\uDF1E</span>';
+  document.body.appendChild(card);
+
+  const anim = card.animate([
+    { opacity: 0, offset: 0 },
+    { opacity: 1, offset: 0.08 },
+    { opacity: 1, offset: 0.75 },
+    { opacity: 0, offset: 1 },
+  ], { duration: 850, easing: 'ease-out' });
+
+  card.querySelector('.gear5-powerup-text').animate([
+    { transform: 'scale(0.4) rotate(0deg)', filter: 'brightness(2.2)', offset: 0 },
+    { transform: 'scale(1.2) rotate(-8deg)', filter: 'brightness(1.6)', offset: 0.2 },
+    { transform: 'scale(0.95) rotate(6deg)', filter: 'brightness(1)', offset: 0.35 },
+    { transform: 'scale(1.05) rotate(-4deg)', filter: 'brightness(1.1)', offset: 0.5 },
+    { transform: 'scale(1) rotate(3deg)', filter: 'brightness(1)', offset: 0.68 },
+    { transform: 'scale(1) rotate(0deg)', filter: 'brightness(1)', offset: 0.85 },
+    { transform: 'scale(1.08) rotate(0deg)', filter: 'brightness(1.3)', offset: 1 },
+  ], { duration: 850, easing: 'ease-out' });
+
+  anim.onfinish = () => card.remove();
 }
 
 /* =========================================================
