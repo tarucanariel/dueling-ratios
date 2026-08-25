@@ -6,7 +6,7 @@ import { ref, remove } from 'firebase/database';
 import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
-import { playSound, playCorrectSound } from './sounds.js';
+import { playSound, playCorrectSound, playStartSound } from './sounds.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 
 /* =========================================================
@@ -1649,7 +1649,7 @@ function tryStartGame(){
   el.setupModal.classList.add('hidden');
   el.gameScreen.classList.remove('hidden');
 
-  playSound('start');
+  playStartSound(activeTileEffectId());
   startNextPair();
   if(timerOn) startTimer();
 }
@@ -2177,7 +2177,7 @@ function onRoomUpdate(room){
   // their own listener, so diffing prev-vs-new here fires them identically
   // for host and guest, regardless of which one triggered the change.
   const prevGuestPresent = !!prevRoom?.players?.guest;
-  if(!prevGuestPresent && guestP) playSound('start');
+  if(!prevGuestPresent && guestP) playStartSound(activeTileEffectId());
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished'){
     playSound('winner');
@@ -2317,7 +2317,7 @@ function onRoomUpdate(room){
   // rematch flips it back from 'finished', so make sure the winner modal
   // and its rematch UI don't linger on top of the fresh game screen.
   if(isFreshGameStart && prevRoom?.status === 'finished'){
-    playSound('start');
+    playStartSound(activeTileEffectId());
   }
   el.winnerModal.classList.add('hidden');
   el.rematchStatus.classList.add('hidden');
@@ -2745,7 +2745,7 @@ function rematchLocal(){
   el.chipP2Timer.classList.toggle('hidden', !timerOn || !(state.mode === 'vs' || state.mode === 'computer'));
 
   el.gameScreen.classList.remove('hidden');
-  playSound('start');
+  playStartSound(activeTileEffectId());
   startNextPair();
   if(timerOn) startTimer();
 }
@@ -2939,7 +2939,7 @@ function renderSpectatorRoom(room){
   state.currentPlayer = room.turn === 'host' ? 0 : 1;
 
   const prevGuestPresent = !!prevRoom?.players?.guest;
-  if(!prevGuestPresent && guestP) playSound('start');
+  if(!prevGuestPresent && guestP) playStartSound(activeTileEffectId());
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
   // Unlike onRoomUpdate's version of this same check, a spectator has
@@ -3255,6 +3255,7 @@ const TILE_EFFECTS = [
   { id: 'warp-zoom',      name: 'Warp Zoom',       icon: '\u26A1', unlockBadgeId: 'sharpshooter' },
   { id: 'confetti-burst', name: 'Confetti Burst',  icon: '\uD83C\uDF89', unlockBadgeId: 'streak-20' },
   { id: 'sparkle-trail',  name: 'Sparkle Trail',   icon: '\u2728', unlockBadgeId: 'operations-mastered' },
+  { id: 'bankai',         name: 'Bankai',          icon: '\uD83D\uDDE1\uFE0F', unlockBadgeId: 'speed-master' },
 ];
 const TILE_EFFECTS_BY_ID = Object.fromEntries(TILE_EFFECTS.map((e) => [e.id, e]));
 
@@ -3456,6 +3457,25 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     ];
     duration = 420;
     easing = 'ease-in';
+  } else if(effectId === 'bankai'){
+    // Speed Master is the hardest badge in the game to earn, so this
+    // is deliberately the single most dramatic effect: not a toss, a
+    // blade release. A quick pull-back (drawing the blade) into a
+    // near-straight slash — no soft arc peak like every other effect
+    // — stretched into a streak shape (scaleX/scaleY) at full speed,
+    // glowing hotter red than anything else in the roster, then
+    // vanishing at the instant of "impact". The screen-wide flash that
+    // completes the impact is spawnBankaiFlash() below, not part of
+    // these keyframes (this clone is gone by the time it fires).
+    keyframes = [
+      { transform: 'translate(0,0) scale(1) rotate(0deg)', filter: 'brightness(1) drop-shadow(0 0 0px #ff1744)', opacity: 1, offset: 0 },
+      { transform: `translate(${-dx * 0.07}px, ${-dy * 0.07}px) scale(0.85) rotate(-10deg)`, filter: 'brightness(1.3) drop-shadow(0 0 6px #ff1744)', opacity: 1, offset: 0.14 },
+      { transform: `translate(${dx * 0.6}px, ${dy * 0.6}px) scaleX(1.9) scaleY(0.45) rotate(16deg)`, filter: 'brightness(2.4) drop-shadow(0 0 26px #ff1744)', opacity: 1, offset: 0.55 },
+      { transform: `translate(${dx * 0.94}px, ${dy * 0.94}px) scaleX(1.15) scaleY(0.6) rotate(20deg)`, filter: 'brightness(3) drop-shadow(0 0 34px #ff1744)', opacity: 1, offset: 0.82 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.05) rotate(24deg)`, filter: 'brightness(3.2) drop-shadow(0 0 0px #ff1744)', opacity: 0, offset: 1 },
+    ];
+    duration = 300; // fastest flight of any effect — blade-fast, not floaty
+    easing = 'cubic-bezier(0.6, 0.02, 0.85, 0.4)'; // sharp whip-crack acceleration, not a gentle ease
   } else { // 'classic' (also the fallback for any unrecognized effect id)
     keyframes = [
       { transform: 'translate(0,0) scale(1)', offset: 0 },
@@ -3469,9 +3489,12 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
   const anim = clone.animate(keyframes, { duration, easing });
   anim.onfinish = () => clone.remove();
 
-  // The two "extra flourish" effects layer a signature visual on top
+  // The three "extra flourish" effects layer a signature visual on top
   // of their own flight above: confetti bursts right as it lands,
-  // sparkles trail along the same path while it's still moving.
+  // sparkles trail along the same path while it's still moving, and
+  // Bankai's blade slash ends in a hard, screen-wide flash rather than
+  // anything localized to the landing point — reflecting a "sharp full
+  // flash" per the badge's difficulty rather than a subtle pulse.
   if(effectId === 'confetti-burst'){
     const landX = endRect.left + endRect.width / 2;
     const landY = endRect.top + endRect.height / 2;
@@ -3480,6 +3503,11 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     const startX = startRect.left + startRect.width / 2;
     const startY = startRect.top + startRect.height / 2;
     spawnSparkleTrail(startX, startY, dx, dy, duration);
+  } else if(effectId === 'bankai'){
+    const startX = startRect.left + startRect.width / 2;
+    const startY = startRect.top + startRect.height / 2;
+    spawnBankaiFlames(startX, startY, dx, dy, duration);
+    anim.onfinish = () => { clone.remove(); spawnBankaiFlash(); };
   }
 }
 
@@ -3546,6 +3574,54 @@ function spawnSparkleTrail(startX, startY, dx, dy, totalDuration){
       anim.onfinish = () => dot.remove();
     }, t * totalDuration);
   });
+}
+
+/* Bankai's flight trail — black flame wisps spawned progressively
+   along the blade's path while it's still moving, same technique as
+   spawnSparkleTrail() above (a real 🔥 glyph, not a hand-drawn shape,
+   since it's cheap and instantly reads as "flame"). Recolored from its
+   native orange to black via CSS filter (see .bankai-flame below) with
+   a red glow standing in for the embers, keeping it on-theme rather
+   than just reusing an ordinary fire look. Each wisp drifts up and
+   slightly sideways with a bit of random jitter per point so the trail
+   flickers rather than reading as a rigid dotted line, then fades. */
+function spawnBankaiFlames(startX, startY, dx, dy, totalDuration){
+  [0.06, 0.18, 0.3, 0.42, 0.54, 0.66, 0.78, 0.88].forEach((t) => {
+    setTimeout(() => {
+      const x = dx * t;
+      const y = dy * t;
+      const flame = document.createElement('div');
+      flame.className = 'bankai-flame';
+      flame.textContent = '\uD83D\uDD25';
+      flame.style.left = `${startX + x}px`;
+      flame.style.top = `${startY + y}px`;
+      document.body.appendChild(flame);
+      const drift = (Math.random() - 0.5) * 18; // per-wisp sideways jitter, not a fixed offset — reads as flicker
+      const anim = flame.animate([
+        { transform: 'translate(-50%,-50%) scale(0.55) rotate(0deg)', opacity: 0.95, offset: 0 },
+        { transform: `translate(calc(-50% + ${drift}px), -65%) scale(1.2) rotate(${drift}deg)`, opacity: 1, offset: 0.35 },
+        { transform: `translate(calc(-50% + ${drift * 1.6}px), -150%) scale(0.35) rotate(${drift * 2}deg)`, opacity: 0, offset: 1 },
+      ], { duration: 480, easing: 'ease-out' });
+      anim.onfinish = () => flame.remove();
+    }, t * totalDuration);
+  });
+}
+
+/* Bankai's landing flourish — a sharp, full-viewport red flash the
+   instant the blade "lands", rather than anything scoped to the
+   landing point the way Confetti Burst/Sparkle Trail are. Purely
+   cosmetic (position:fixed, pointer-events:none) and self-removes the
+   moment its own animation finishes. */
+function spawnBankaiFlash(){
+  const flash = document.createElement('div');
+  flash.className = 'bankai-screen-flash';
+  document.body.appendChild(flash);
+  const anim = flash.animate([
+    { opacity: 0, offset: 0 },
+    { opacity: 1, offset: 0.12 },
+    { opacity: 0, offset: 1 },
+  ], { duration: 260, easing: 'ease-out' });
+  anim.onfinish = () => flash.remove();
 }
 
 /* =========================================================

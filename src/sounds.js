@@ -6,6 +6,7 @@
    ========================================================= */
 
 import startUrl from './assets/sounds/start.mp3';
+import bankaiStartUrl from './assets/sounds/bankai.mp3';
 import correctUrl from './assets/sounds/correct.mp3';
 import wrongUrl from './assets/sounds/wrong.mp3';
 import nextUrl from './assets/sounds/next.mp3';
@@ -28,11 +29,13 @@ import correctSpinTossUrl from './assets/sounds/correct-spin-toss.mp3';
 import correctWarpZoomUrl from './assets/sounds/correct-warp-zoom.mp3';
 import correctConfettiBurstUrl from './assets/sounds/correct-confetti-burst.mp3';
 import correctSparkleTrailUrl from './assets/sounds/correct-sparkle-trail.mp3';
+import correctBankaiUrl from './assets/sounds/correct-bankai.mp3';
 
 const DEFAULT_VOLUME = 0.7;
 
 const sources = {
   start: startUrl,
+  bankaiStart: bankaiStartUrl,
   correct: correctUrl,
   wrong: wrongUrl,
   next: nextUrl,
@@ -49,6 +52,7 @@ const correctPackSources = {
   'warp-zoom': correctWarpZoomUrl,
   'confetti-burst': correctConfettiBurstUrl,
   'sparkle-trail': correctSparkleTrailUrl,
+  'bankai': correctBankaiUrl,
 };
 
 // One base <audio> element per sound, preloaded.
@@ -86,6 +90,22 @@ export function playSound(name){
   const instance = source.cloneNode();
   instance.volume = DEFAULT_VOLUME;
   instance.play().catch(() => { /* autoplay restriction — ignore */ });
+}
+
+/* Plays the game-start sound, swapping in Bankai's own bankai.mp3
+   instead of the default start.mp3 whenever the given tile-effect id
+   is 'bankai' — every other equipped/locked/unrecognized id (including
+   'classic') just plays the normal start sound, unchanged. This is
+   deliberately Bankai-specific, not a generic "start pack" system the
+   way correct-answer sounds are (see correctPackSources/playCorrectSound
+   below) — Bankai is the only effect with its own start cue for now, so
+   a single conditional here is simpler than a whole parallel pack
+   keyed by effect id for just one entry. Like playCorrectSound(), this
+   only knows about sound files — whether the id is actually unlocked,
+   and whether a custom start sound even makes sense for a given call
+   site, are main.js's job to resolve before calling this. */
+export function playStartSound(effectId){
+  playSound(effectId === 'bankai' ? 'bankaiStart' : 'start');
 }
 
 /* Plays the correct-answer sound, using the given tile-effect id's
