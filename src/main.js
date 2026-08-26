@@ -1657,6 +1657,7 @@ function tryStartGame(){
 
 function resetToSetup(){
   stopTimer();
+  stopUltraInstinctAmbientParticles();
   leaveOnlineRoom();
   stopSpectating(false);
   closeWatchList();
@@ -3278,7 +3279,10 @@ function activeTileEffectId(){
    stay in sync instead of needing to be triggered from two separate
    places that could drift apart later. Every other effect (including
    'classic') just gets the sound, unchanged — the flash card is
-   Bankai/Gear 5-only. */
+   Bankai/Gear 5-only. Ultra Instinct deliberately gets its own start
+   SOUND (see playStartSound() in sounds.js) but no card here, on
+   purpose — a flashy full-viewport announcement would contradict the
+   "calm, no wasted movement" idea the whole effect is built around. */
 function announceGameStart(effectId){
   playStartSound(effectId);
   if(effectId === 'bankai') spawnBankaiPowerUpCard();
@@ -3298,6 +3302,199 @@ function applyTileEffectTheme(){
   TILE_EFFECTS.forEach((effect) => el.gameScreen.classList.remove(`effect-theme-${effect.id}`));
   const effectId = activeTileEffectId();
   if(effectId !== 'classic') el.gameScreen.classList.add(`effect-theme-${effectId}`);
+
+  // Ultra Instinct is the only board theme with actual motion
+  // happening inside it, not just a static pulse — a slow rise of
+  // small silvery particles (plus a faster, tinier "dust" layer mixed
+  // in for depth/parallax) drifting up out of the problem strip/pool
+  // tray, and a rare fast streak crossing the board every so often.
+  // Unlike every other theme (pure CSS keyframes on the container),
+  // that needs real DOM elements spawned over time, so it's driven by
+  // plain setIntervals/setTimeouts here rather than CSS animation.
+  // Guarded on both sides since this function re-runs on every board
+  // render: starts everything once on first entering the theme (not
+  // every render, which would otherwise stack up duplicates), and
+  // stops it all the moment the theme is no longer active so nothing
+  // keeps spawning into a board that no longer shows it.
+  // resetToSetup() below also calls the stop half directly, for
+  // leaving the game screen entirely rather than just switching effects.
+  if(effectId === 'ultra-instinct'){
+    if(!ultraInstinctParticleInterval) ultraInstinctParticleInterval = setInterval(spawnUltraInstinctAmbientParticle, 650);
+    if(!ultraInstinctDustInterval) ultraInstinctDustInterval = setInterval(spawnUltraInstinctDustMote, 280);
+    if(!ultraInstinctReflexTimeout) scheduleUltraInstinctReflexStreak();
+  } else {
+    stopUltraInstinctAmbientParticles();
+  }
+}
+
+// Tracks the setInterval/setTimeout ids from applyTileEffectTheme()
+// above — module level (not state.*) since these are timer handles,
+// not app data, same category as the timer/interval ids stopTimer()
+// already manages elsewhere in this file.
+let ultraInstinctParticleInterval = null;
+let ultraInstinctDustInterval = null;
+let ultraInstinctReflexTimeout = null;
+
+function stopUltraInstinctAmbientParticles(){
+  if(ultraInstinctParticleInterval){
+    clearInterval(ultraInstinctParticleInterval);
+    ultraInstinctParticleInterval = null;
+  }
+  if(ultraInstinctDustInterval){
+    clearInterval(ultraInstinctDustInterval);
+    ultraInstinctDustInterval = null;
+  }
+  if(ultraInstinctReflexTimeout){
+    clearTimeout(ultraInstinctReflexTimeout);
+    ultraInstinctReflexTimeout = null;
+  }
+}
+
+/* Schedules the NEXT reflex streak on a random 9–15s delay (a setTimeout
+   chain, not a setInterval like the two particle layers above) — a
+   fixed interval would read as a metronomic tick, undermining "rare
+   glimpse" the moment a player noticed the rhythm. Each firing checks
+   whether the theme is still actually active before spawning a streak
+   and re-arming itself; if it isn't (equipped effect changed, or the
+   game screen was left, since resetToSetup() clears the pending
+   timeout too but this covers the narrow race where a timeout fires in
+   the same tick a stop happens), it just quietly stops the chain
+   instead of continuing to schedule into a board that no longer shows
+   it. */
+function scheduleUltraInstinctReflexStreak(){
+  const delay = 9000 + Math.random() * 6000;
+  ultraInstinctReflexTimeout = setTimeout(() => {
+    if(document.querySelector('.effect-theme-ultra-instinct')){
+      spawnUltraInstinctReflexStreak();
+      scheduleUltraInstinctReflexStreak();
+    } else {
+      ultraInstinctReflexTimeout = null;
+    }
+  }, delay);
+}
+
+/* A single reflex streak — a thin, fast, barely-there white line
+   sweeping straight across one themed container's full width (plus a
+   little overshoot on each side so it visibly enters/exits rather than
+   just appearing/vanishing mid-box) in a random direction, gone in
+   about a fifth of a second. Deliberately the fastest-moving thing in
+   the whole effect (faster even than the tile's own 220ms flight) —
+   reads as "did I just see that?" rather than a clear, trackable
+   motion, matching a glimpse of an instinctive dodge rather than a
+   deliberate showy motion. */
+function spawnUltraInstinctReflexStreak(){
+  const containers = document.querySelectorAll(
+    '.effect-theme-ultra-instinct .problem-strip, .effect-theme-ultra-instinct .pool-tray'
+  );
+  if(!containers.length) return;
+  const container = containers[Math.floor(Math.random() * containers.length)];
+  const rect = container.getBoundingClientRect();
+  if(rect.width === 0 || rect.height === 0) return;
+
+  const goingRight = Math.random() > 0.5;
+  const y = rect.top + Math.random() * rect.height;
+  const streakWidth = 90 + Math.random() * 60;
+  const startX = goingRight ? rect.left - streakWidth : rect.right + streakWidth;
+  const endX = goingRight ? rect.right + streakWidth : rect.left - streakWidth;
+
+  const streak = document.createElement('div');
+  streak.className = 'ultra-instinct-reflex-streak';
+  streak.style.top = `${y}px`;
+  streak.style.left = `${startX}px`;
+  streak.style.width = `${streakWidth}px`;
+  document.body.appendChild(streak);
+
+  const anim = streak.animate([
+    { transform: 'translate(0,-50%)', opacity: 0, offset: 0 },
+    { transform: 'translate(0,-50%)', opacity: 0.9, offset: 0.15 },
+    { transform: `translate(${endX - startX}px,-50%)`, opacity: 0.9, offset: 0.75 },
+    { transform: `translate(${endX - startX}px,-50%)`, opacity: 0, offset: 1 },
+  ], { duration: 220, easing: 'linear' });
+  anim.onfinish = () => streak.remove();
+}
+
+/* One tick of Ultra Instinct's ambient board particles — spawns a
+   single small silvery circle rising up out of whichever themed
+   container (problem strip or pool tray) it happens to land in this
+   time, picked at random each call so particles don't all originate
+   from the same spot. Queries the DOM directly for
+   .effect-theme-ultra-instinct's own children rather than caching
+   rects once, since the board's layout can reflow between ticks (new
+   problem, resize, orientation change) — a stale cached rect would
+   drift out of alignment with the real board over a long game. If the
+   theme has already turned off by the time a tick fires (interval
+   cleared a moment too late relative to a render), the query simply
+   comes back empty and this is a no-op — never throws. */
+function spawnUltraInstinctAmbientParticle(){
+  const containers = document.querySelectorAll(
+    '.effect-theme-ultra-instinct .problem-strip, .effect-theme-ultra-instinct .pool-tray'
+  );
+  if(!containers.length) return;
+  const container = containers[Math.floor(Math.random() * containers.length)];
+  const rect = container.getBoundingClientRect();
+  if(rect.width === 0 || rect.height === 0) return; // container hidden/collapsed right now
+
+  const startX = rect.left + Math.random() * rect.width;
+  const startY = rect.top + rect.height - Math.random() * 6; // starts right at the bottom edge, not scattered mid-box
+  const size = 4 + Math.random() * 5;
+  const drift = (Math.random() - 0.5) * 26; // gentle sideways wander, not a straight vertical line
+  const riseDistance = rect.height + 30 + Math.random() * 30; // clears the whole container height before fading out
+  const duration = 2200 + Math.random() * 1000; // slow — matches the calm tone, not a quick particle burst
+
+  const particle = document.createElement('div');
+  particle.className = 'ultra-instinct-particle';
+  particle.style.left = `${startX}px`;
+  particle.style.top = `${startY}px`;
+  particle.style.width = `${size}px`;
+  particle.style.height = `${size}px`;
+  document.body.appendChild(particle);
+
+  const anim = particle.animate([
+    { transform: 'translate(-50%,-50%) translate(0,0)', opacity: 0, offset: 0 },
+    { transform: 'translate(-50%,-50%) translate(0,0)', opacity: 0.75, offset: 0.15 },
+    { transform: `translate(-50%,-50%) translate(${drift}px, ${-riseDistance}px)`, opacity: 0, offset: 1 },
+  ], { duration, easing: 'ease-out' });
+  anim.onfinish = () => particle.remove();
+}
+
+/* Ultra Instinct's second, faster particle layer — much smaller, much
+   quicker specks mixed in with the main circles above (spawned on its
+   own faster interval, roughly every 280ms vs. the main particle's
+   650ms) purely for depth: two consistent sizes/speeds moving at once
+   reads as parallax rather than one uniform stream of identical dots.
+   Same container-picking and cleanup approach as
+   spawnUltraInstinctAmbientParticle() above — see that function's own
+   comment for why it queries fresh each tick instead of caching rects. */
+function spawnUltraInstinctDustMote(){
+  const containers = document.querySelectorAll(
+    '.effect-theme-ultra-instinct .problem-strip, .effect-theme-ultra-instinct .pool-tray'
+  );
+  if(!containers.length) return;
+  const container = containers[Math.floor(Math.random() * containers.length)];
+  const rect = container.getBoundingClientRect();
+  if(rect.width === 0 || rect.height === 0) return;
+
+  const startX = rect.left + Math.random() * rect.width;
+  const startY = rect.top + rect.height - Math.random() * 6;
+  const size = 1.5 + Math.random() * 1.5; // noticeably smaller than the main particle's 4–9px
+  const drift = (Math.random() - 0.5) * 16;
+  const riseDistance = rect.height * 0.45 + Math.random() * 30; // doesn't need to clear the whole container — reads as closer/faster, not longer-lived
+  const duration = 700 + Math.random() * 400; // roughly a third of the main particle's lifetime
+
+  const mote = document.createElement('div');
+  mote.className = 'ultra-instinct-dust';
+  mote.style.left = `${startX}px`;
+  mote.style.top = `${startY}px`;
+  mote.style.width = `${size}px`;
+  mote.style.height = `${size}px`;
+  document.body.appendChild(mote);
+
+  const anim = mote.animate([
+    { transform: 'translate(-50%,-50%) translate(0,0)', opacity: 0, offset: 0 },
+    { transform: 'translate(-50%,-50%) translate(0,0)', opacity: 0.55, offset: 0.2 },
+    { transform: `translate(-50%,-50%) translate(${drift}px, ${-riseDistance}px)`, opacity: 0, offset: 1 },
+  ], { duration, easing: 'ease-out' });
+  anim.onfinish = () => mote.remove();
 }
 
 /* Persists which effect is equipped, with an optimistic local update
@@ -3512,6 +3709,26 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     ];
     duration = 460; // slowest flight of any effect — a bouncy wander, not a straight shot
     easing = 'ease-in-out';
+  } else if(effectId === 'ultra-instinct'){
+    // Deliberately the calmest, most minimal flight in the roster —
+    // every other effect above adds an arc, a spin, a wobble, or a
+    // windup; this one is a nearly straight line with almost no
+    // embellishment, reflecting "no wasted movement" rather than a
+    // bigger show of effort. The only flourish is a brief motion-blur
+    // pulse via filter mid-flight — no scale changes, no rotation, no
+    // overshoot — and it's the single fastest flight of any effect
+    // (shorter even than Bankai's), since effortlessness reads as
+    // "already there" rather than "arriving dramatically." No landing
+    // flourish either (see the dispatch below): the afterimage trail
+    // during flight, spawned by spawnUltraInstinctAfterimages() below,
+    // IS the whole effect.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', filter: 'blur(0px) brightness(1)', opacity: 1, offset: 0 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5}px) scale(0.97)`, filter: 'blur(2.5px) brightness(1.4)', opacity: 0.9, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.92)`, filter: 'blur(0px) brightness(1)', opacity: 0, offset: 1 },
+    ];
+    duration = 220; // fastest flight of any effect, on purpose — see comment above
+    easing = 'linear';
   } else { // 'classic' (also the fallback for any unrecognized effect id)
     keyframes = [
       { transform: 'translate(0,0) scale(1)', offset: 0 },
@@ -3525,12 +3742,16 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
   const anim = clone.animate(keyframes, { duration, easing });
   anim.onfinish = () => clone.remove();
 
-  // The three "extra flourish" effects layer a signature visual on top
+  // The "extra flourish" effects each layer a signature visual on top
   // of their own flight above: confetti bursts right as it lands,
-  // sparkles trail along the same path while it's still moving, and
+  // sparkles trail along the same path while it's still moving,
   // Bankai's blade slash ends in a hard, screen-wide flash rather than
-  // anything localized to the landing point — reflecting a "sharp full
-  // flash" per the badge's difficulty rather than a subtle pulse.
+  // anything localized to the landing point (reflecting a "sharp full
+  // flash" per the badge's difficulty rather than a subtle pulse),
+  // Gear 5 bursts with stars right at the landing point, and Ultra
+  // Instinct's afterimage trail is deliberately the ONLY one of these
+  // with no landing moment at all — see spawnUltraInstinctAfterimages()
+  // below for why.
   if(effectId === 'confetti-burst'){
     const landX = endRect.left + endRect.width / 2;
     const landY = endRect.top + endRect.height / 2;
@@ -3548,6 +3769,12 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     const landX = endRect.left + endRect.width / 2;
     const landY = endRect.top + endRect.height / 2;
     anim.onfinish = () => { clone.remove(); spawnGear5Burst(landX, landY); };
+  } else if(effectId === 'ultra-instinct'){
+    // No onfinish override here — same reasoning as Sparkle Trail
+    // above: the trail is the whole flourish, so landing just uses the
+    // default `anim.onfinish = () => clone.remove();` set before this
+    // dispatch, with nothing extra spawned at the landing point.
+    spawnUltraInstinctAfterimages(startRect, dx, dy, clone.textContent, computed.fontSize, duration);
   }
 }
 
@@ -3616,6 +3843,43 @@ function spawnSparkleTrail(startX, startY, dx, dy, totalDuration){
   });
 }
 
+/* Ultra Instinct's flight trail — and its ENTIRE flourish, unlike
+   every other effect above, per the discussion this was built from:
+   no landing burst, no screen flash, nothing. A few dimmed, recolored
+   duplicates of the tile itself (not a generic glyph, unlike the
+   flame/sparkle trails above) are dropped at fixed points along the
+   same straight line the real tile is already flying, each one fading
+   out quickly right where it was dropped rather than drifting or
+   spinning — reading as calm "the tile was already there a moment
+   ago" ghosting rather than an energetic particle effect. Positioned
+   with plain left/top (matching how the real clone in
+   animateTileThrow() above is positioned) rather than the centered
+   translate(-50%,-50%) the sparkle/flame trails use, since this is
+   meant to look like a duplicate of the tile's own box, not a small
+   floating particle. */
+function spawnUltraInstinctAfterimages(startRect, dx, dy, tileText, fontSize, totalDuration){
+  const startX = startRect.left;
+  const startY = startRect.top;
+  [0.12, 0.32, 0.5, 0.68, 0.84].forEach((t) => {
+    setTimeout(() => {
+      const ghost = document.createElement('div');
+      ghost.className = 'ultra-instinct-afterimage';
+      ghost.textContent = tileText;
+      ghost.style.left = `${startX + dx * t}px`;
+      ghost.style.top = `${startY + dy * t}px`;
+      ghost.style.width = `${startRect.width}px`;
+      ghost.style.height = `${startRect.height}px`;
+      ghost.style.fontSize = fontSize;
+      document.body.appendChild(ghost);
+      const anim = ghost.animate([
+        { opacity: 0.5, transform: 'scale(1)', offset: 0 },
+        { opacity: 0, transform: 'scale(0.9)', offset: 1 },
+      ], { duration: 240, easing: 'ease-out' });
+      anim.onfinish = () => ghost.remove();
+    }, t * totalDuration);
+  });
+}
+
 /* Bankai's flight trail — black flame wisps spawned progressively
    along the blade's path while it's still moving, same technique as
    spawnSparkleTrail() above (a real 🔥 glyph, not a hand-drawn shape,
@@ -3625,8 +3889,7 @@ function spawnSparkleTrail(startX, startY, dx, dy, totalDuration){
    than just reusing an ordinary fire look. Each wisp drifts up and
    slightly sideways with a bit of random jitter per point so the trail
    flickers rather than reading as a rigid dotted line, then fades. */
-function spawnBankaiFlames(startX, startY, dx, dy, totalDuration){
-  [0.06, 0.18, 0.3, 0.42, 0.54, 0.66, 0.78, 0.88].forEach((t) => {
+function spawnBankaiFlames(startX, startY, dx, dy, totalDuration){  [0.06, 0.18, 0.3, 0.42, 0.54, 0.66, 0.78, 0.88].forEach((t) => {
     setTimeout(() => {
       const x = dx * t;
       const y = dy * t;

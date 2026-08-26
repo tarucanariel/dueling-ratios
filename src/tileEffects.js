@@ -23,11 +23,18 @@ export const TILE_EFFECTS = [
   { id: 'confetti-burst', name: 'Confetti Burst',  icon: '\uD83C\uDF89', unlockBadgeIds: ['streak-20'] },
   { id: 'sparkle-trail',  name: 'Sparkle Trail',   icon: '\u2728', unlockBadgeIds: ['operations-mastered'] },
   { id: 'bankai',         name: 'Bankai',          icon: '\uD83D\uDDE1\uFE0F', unlockBadgeIds: ['speed-master'] },
-  // The only two-badge unlock in the roster on purpose — Gear 5 is
-  // meant to read as the roster's capstone alongside Bankai, so it
-  // asks for both a streak badge AND the operation-mastery capstone
-  // rather than just one more single badge like everything else.
+  // The only two-badge unlocks in the roster on purpose — Gear 5 and
+  // Ultra Instinct are meant to read as the roster's capstones, each
+  // demanding two hard badges together rather than one more single
+  // badge like everything else.
   { id: 'gear-5',         name: 'Gear 5',          icon: '\uD83C\uDF1E', unlockBadgeIds: ['streak-40', 'operations-mastered'] },
+  // Ultra Instinct is paired with the two hardest ACCURACY/VOLUME
+  // badges (not a streak or speed badge, unlike everything above) on
+  // purpose — it's meant to read as calm, sustained mastery rather
+  // than a single flashy run, matching its own deliberately-quiet
+  // flight animation in main.js (an afterimage trail, no landing
+  // flourish at all).
+  { id: 'ultra-instinct', name: 'Ultra Instinct',  icon: '\u26AA', unlockBadgeIds: ['accuracy-98', 'lifetime-1000'] },
 ];
 
 export const TILE_EFFECTS_BY_ID = Object.fromEntries(TILE_EFFECTS.map((e) => [e.id, e]));

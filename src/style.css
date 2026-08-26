@@ -2157,6 +2157,84 @@ body{
   white-space:nowrap;
 }
 
+/* Ultra Instinct's ONLY per-toss flourish (the persistent ambient
+   board particles below are separate — part of the board theme, not
+   the toss itself) — spawned by spawnUltraInstinctAfterimages() in
+   main.js. Deliberately built to look like a dim duplicate of the tile
+   itself (matching .thrown-tile below: same shape/layout/font, just
+   recolored) rather than a distinct particle shape like every other
+   trail piece above, since the whole point is "a ghost of the tile
+   that was already here" — z-index sits one below .thrown-tile's 999
+   so a real, still-moving tile always renders on top of its own trail
+   rather than behind it. */
+.ultra-instinct-afterimage{
+  position:fixed;
+  z-index:998;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:50%;
+  background:linear-gradient(135deg, #f4f4f4, #ffffff);
+  color:#3a3a3a;
+  font-family:'JetBrains Mono', monospace;
+  font-weight:700;
+  box-shadow:0 0 10px rgba(255,255,255,0.4);
+  pointer-events:none;
+  filter:blur(0.5px);
+}
+
+/* Ultra Instinct's persistent ambient board particle — spawned
+   repeatedly (roughly every 650ms) by
+   spawnUltraInstinctAmbientParticle() in main.js for as long as the
+   theme is active, giving the board itself some quiet motion instead
+   of just a static pulse (every other board theme is pure CSS with no
+   spawned elements). Sits at a low z-index — well under the afterimage
+   trail (998) or a tossed tile (999) — since these should read as
+   background ambience behind gameplay, never on top of it. */
+.ultra-instinct-particle{
+  position:fixed;
+  z-index:5;
+  border-radius:50%;
+  background:radial-gradient(circle, rgba(255,255,255,0.95), rgba(220,220,220,0.15));
+  box-shadow:0 0 6px rgba(255,255,255,0.6);
+  pointer-events:none;
+}
+
+/* Ultra Instinct's second, faster particle layer — spawned by
+   spawnUltraInstinctDustMote() in main.js, mixed in alongside
+   .ultra-instinct-particle above on its own faster interval. Smaller
+   and with barely any glow (vs. the main particle's visible box-shadow)
+   so the two layers read as distinct depths — bigger/slower/brighter
+   vs. tinier/quicker/dimmer — rather than one particle type at two
+   sizes. */
+.ultra-instinct-dust{
+  position:fixed;
+  z-index:5;
+  border-radius:50%;
+  background:rgba(255,255,255,0.85);
+  pointer-events:none;
+}
+
+/* Ultra Instinct's rare reflex streak — spawned occasionally (every
+   9–15s, see scheduleUltraInstinctReflexStreak() in main.js) rather
+   than continuously like the particles/dust above. A thin horizontal
+   bar, faded at both ends (not a hard-edged rectangle) so it reads as
+   a streak of light rather than a moving box, with just enough glow to
+   register without competing with the rest of the ambient effect.
+   z-index sits one above the particle layers (5) but still well under
+   the afterimage trail (998)/tossed tile (999), consistent with all
+   of Ultra Instinct's ambient board elements staying below actual
+   gameplay. */
+.ultra-instinct-reflex-streak{
+  position:fixed;
+  z-index:6;
+  height:2px;
+  border-radius:999px;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,0.95) 35%, rgba(255,255,255,0.95) 65%, transparent);
+  box-shadow:0 0 10px rgba(255,255,255,0.75), 0 0 20px rgba(255,255,255,0.35);
+  pointer-events:none;
+}
+
 /* =========================================================
    Effect board themes — a persistent, ambient visual on the whole
    problem strip + tile pool for whichever effect is equipped, so it
@@ -2303,6 +2381,58 @@ body{
   25%{ transform:rotate(-0.6deg); box-shadow:0 0 0 2px rgba(255,213,74,0.65), 0 0 22px rgba(255,213,74,0.4); }
   50%{ transform:rotate(0.4deg); box-shadow:0 0 0 2px rgba(255,243,196,0.85), 0 0 32px rgba(255,213,74,0.55); }
   75%{ transform:rotate(-0.3deg); box-shadow:0 0 0 2px rgba(255,213,74,0.65), 0 0 22px rgba(255,213,74,0.4); }
+}
+
+/* Ultra Instinct — the calmest board theme in the roster on purpose,
+   matching its "no wasted movement" flight animation: no color shift
+   (silver/white only, unlike every other theme's saturated hue), no
+   rotation or wobble, and a much slower/subtler pulse (4.5s, low
+   amplitude) than Bankai's frantic 1.6s or Gear 5's wobbly 2.2s — it
+   should read as barely-there ambient presence, not another attention
+   grab. */
+.effect-theme-ultra-instinct .problem-strip,
+.effect-theme-ultra-instinct .pool-tray{
+  padding:14px;
+  border-radius:16px;
+  background-color:rgba(255,255,255,0.035);
+  animation:board-ultra-instinct-pulse 4.5s ease-in-out infinite;
+}
+
+@keyframes board-ultra-instinct-pulse{
+  0%, 100%{ box-shadow:0 0 0 1px rgba(235,235,235,0.25), 0 0 10px rgba(235,235,235,0.12); }
+  50%{ box-shadow:0 0 0 1px rgba(255,255,255,0.45), 0 0 16px rgba(255,255,255,0.22); }
+}
+
+/* Ultra Instinct's aura — a large, slow-breathing soft white glow
+   behind the ENTIRE game screen (not just the problem strip/pool
+   tray, unlike the pulse above and the particles/dust in main.js),
+   giving a sense of an aura surrounding the player rather than just
+   the tile pool having a border. `.effect-theme-ultra-instinct` is
+   applied straight to #game-screen (see applyTileEffectTheme() in
+   main.js) which already has `.game-wrap`'s position:relative, but
+   z-index:0 is restated here too so this rule creates its own
+   stacking context — without that, the ::before's z-index:-1 could
+   end up rendered behind unrelated page content instead of staying
+   contained to just behind this element's own children. */
+.effect-theme-ultra-instinct{
+  position:relative;
+  z-index:0;
+}
+
+.effect-theme-ultra-instinct::before{
+  content:'';
+  position:absolute;
+  inset:-48px;
+  z-index:-1;
+  border-radius:28px;
+  background:radial-gradient(circle at 50% 42%, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.06) 45%, rgba(255,255,255,0) 72%);
+  animation:ultra-instinct-aura-breathe 5s ease-in-out infinite;
+  pointer-events:none;
+}
+
+@keyframes ultra-instinct-aura-breathe{
+  0%, 100%{ opacity:0.55; transform:scale(0.97); }
+  50%{ opacity:1; transform:scale(1.04); }
 }
 
 .feedback-line{

@@ -50,3 +50,25 @@ describe('isTileEffectUnlocked — Gear 5 (two-badge unlock)', () => {
     expect(isTileEffectUnlocked('gear-5', earned)).toBe(true);
   });
 });
+
+describe('isTileEffectUnlocked — Ultra Instinct (two-badge unlock)', () => {
+  it('is locked with neither required badge', () => {
+    expect(isTileEffectUnlocked('ultra-instinct', new Set())).toBe(false);
+  });
+
+  it('is locked with only Math Whiz', () => {
+    expect(isTileEffectUnlocked('ultra-instinct', new Set(['accuracy-98']))).toBe(false);
+  });
+
+  it('is locked with only Math Machine', () => {
+    expect(isTileEffectUnlocked('ultra-instinct', new Set(['lifetime-1000']))).toBe(false);
+  });
+
+  it('is unlocked once both required badges are earned', () => {
+    expect(isTileEffectUnlocked('ultra-instinct', new Set(['accuracy-98', 'lifetime-1000']))).toBe(true);
+  });
+
+  it('is not unlocked by the Gear 5 badge pair alone — the two capstones are independent', () => {
+    expect(isTileEffectUnlocked('ultra-instinct', new Set(['streak-40', 'operations-mastered']))).toBe(false);
+  });
+});

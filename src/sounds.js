@@ -8,6 +8,7 @@
 import startUrl from './assets/sounds/start.mp3';
 import bankaiStartUrl from './assets/sounds/bankai.mp3';
 import gear5StartUrl from './assets/sounds/gear5.mp3';
+import ultraInstinctStartUrl from './assets/sounds/ultra-instinct.mp3';
 import correctUrl from './assets/sounds/correct.mp3';
 import wrongUrl from './assets/sounds/wrong.mp3';
 import nextUrl from './assets/sounds/next.mp3';
@@ -32,6 +33,7 @@ import correctConfettiBurstUrl from './assets/sounds/correct-confetti-burst.mp3'
 import correctSparkleTrailUrl from './assets/sounds/correct-sparkle-trail.mp3';
 import correctBankaiUrl from './assets/sounds/correct-bankai.mp3';
 import correctGear5Url from './assets/sounds/correct-gear5.mp3';
+import correctUltraInstinctUrl from './assets/sounds/correct-ultra-instinct.mp3';
 
 const DEFAULT_VOLUME = 0.7;
 
@@ -39,6 +41,7 @@ const sources = {
   start: startUrl,
   bankaiStart: bankaiStartUrl,
   gear5Start: gear5StartUrl,
+  ultraInstinctStart: ultraInstinctStartUrl,
   correct: correctUrl,
   wrong: wrongUrl,
   next: nextUrl,
@@ -57,6 +60,7 @@ const correctPackSources = {
   'sparkle-trail': correctSparkleTrailUrl,
   'bankai': correctBankaiUrl,
   'gear-5': correctGear5Url,
+  'ultra-instinct': correctUltraInstinctUrl,
 };
 
 // One base <audio> element per sound, preloaded.
@@ -96,23 +100,27 @@ export function playSound(name){
   instance.play().catch(() => { /* autoplay restriction — ignore */ });
 }
 
-/* Plays the game-start sound, swapping in Bankai's own bankai.mp3 or
-   Gear 5's own gear5.mp3 instead of the default start.mp3 whenever the
-   given tile-effect id matches one of them — every other equipped/
-   locked/unrecognized id (including 'classic') just plays the normal
-   start sound, unchanged. This is deliberately a short if/else chain
-   for the two effects that currently have their own start cue, not a
-   generic "start pack" system the way correct-answer sounds are (see
-   correctPackSources/playCorrectSound below) — if a third effect ever
-   gets a custom start sound, this is the spot to fold it into a proper
-   pack lookup instead of a third branch. Like playCorrectSound(), this
+/* Which base `sources` key holds a given effect's own start cue —
+   'classic' and every other unrecognized/locked id fall through to
+   the default 'start' below. Was a two-branch if/else chain until
+   Ultra Instinct became the third effect with its own start sound; a
+   lookup table scales to a fourth/fifth far more cleanly than another
+   branch would. */
+const startPackKeys = {
+  'bankai': 'bankaiStart',
+  'gear-5': 'gear5Start',
+  'ultra-instinct': 'ultraInstinctStart',
+};
+
+/* Plays the game-start sound, swapping in the effect's own start cue
+   (see startPackKeys above) whenever one exists — every other
+   equipped/locked/unrecognized id (including 'classic') just plays
+   the normal start sound, unchanged. Like playCorrectSound(), this
    only knows about sound files — whether the id is actually unlocked,
    and whether a custom start sound even makes sense for a given call
    site, are main.js's job to resolve before calling this. */
 export function playStartSound(effectId){
-  if(effectId === 'bankai'){ playSound('bankaiStart'); return; }
-  if(effectId === 'gear-5'){ playSound('gear5Start'); return; }
-  playSound('start');
+  playSound(startPackKeys[effectId] || 'start');
 }
 
 /* Plays the correct-answer sound, using the given tile-effect id's
