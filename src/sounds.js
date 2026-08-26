@@ -9,6 +9,7 @@ import startUrl from './assets/sounds/start.mp3';
 import bankaiStartUrl from './assets/sounds/bankai.mp3';
 import gear5StartUrl from './assets/sounds/gear5.mp3';
 import ultraInstinctStartUrl from './assets/sounds/ultra-instinct.mp3';
+import kageBunshinStartUrl from './assets/sounds/kage-bunshin.mp3';
 import correctUrl from './assets/sounds/correct.mp3';
 import wrongUrl from './assets/sounds/wrong.mp3';
 import nextUrl from './assets/sounds/next.mp3';
@@ -34,6 +35,7 @@ import correctSparkleTrailUrl from './assets/sounds/correct-sparkle-trail.mp3';
 import correctBankaiUrl from './assets/sounds/correct-bankai.mp3';
 import correctGear5Url from './assets/sounds/correct-gear5.mp3';
 import correctUltraInstinctUrl from './assets/sounds/correct-ultra-instinct.mp3';
+import correctKageBunshinUrl from './assets/sounds/correct-kage-bunshin.mp3';
 
 const DEFAULT_VOLUME = 0.7;
 
@@ -42,6 +44,7 @@ const sources = {
   bankaiStart: bankaiStartUrl,
   gear5Start: gear5StartUrl,
   ultraInstinctStart: ultraInstinctStartUrl,
+  kageBunshinStart: kageBunshinStartUrl,
   correct: correctUrl,
   wrong: wrongUrl,
   next: nextUrl,
@@ -61,6 +64,7 @@ const correctPackSources = {
   'bankai': correctBankaiUrl,
   'gear-5': correctGear5Url,
   'ultra-instinct': correctUltraInstinctUrl,
+  'kage-bunshin': correctKageBunshinUrl,
 };
 
 // One base <audio> element per sound, preloaded.
@@ -110,6 +114,7 @@ const startPackKeys = {
   'bankai': 'bankaiStart',
   'gear-5': 'gear5Start',
   'ultra-instinct': 'ultraInstinctStart',
+  'kage-bunshin': 'kageBunshinStart',
 };
 
 /* Plays the game-start sound, swapping in the effect's own start cue

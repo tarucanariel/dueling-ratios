@@ -8,6 +8,7 @@ import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgePro
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound } from './sounds.js';
 import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
+import { isResultTie } from './results.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 
 /* =========================================================
@@ -2671,23 +2672,37 @@ function getOnlineResultText(room){
     };
   }
 
-  if(hostP.score === guestP.score){
-    const timerOn = room.settings.timeControlSeconds > 0;
-    const hostTime = room.timeRemaining?.host;
-    const guestTime = room.timeRemaining?.guest;
-    if(timerOn && hostTime !== guestTime){
-      const winner = hostTime > guestTime ? hostP : guestP;
-      const loser = hostTime > guestTime ? guestP : hostP;
-      const winnerTime = hostTime > guestTime ? hostTime : guestTime;
-      const loserTime = hostTime > guestTime ? guestTime : hostTime;
+  // isResultTie() (see results.js) calls it a tie either on matching
+  // scores (the original rule) OR matching accuracy despite different
+  // scores — e.g. 5/5 vs 6/6 are both 100% accuracy, so the score gap
+  // there is purely from one player getting an extra attempt, not from
+  // playing better. The time-based tiebreaker below still only applies
+  // when scores are ACTUALLY equal, not just accuracy — "who had more
+  // time left" only makes sense to ask when there's a genuine tied
+  // point total to break, not when the scores themselves differ.
+  if(isResultTie(hostP, guestP)){
+    if(hostP.score === guestP.score){
+      const timerOn = room.settings.timeControlSeconds > 0;
+      const hostTime = room.timeRemaining?.host;
+      const guestTime = room.timeRemaining?.guest;
+      if(timerOn && hostTime !== guestTime){
+        const winner = hostTime > guestTime ? hostP : guestP;
+        const loser = hostTime > guestTime ? guestP : hostP;
+        const winnerTime = hostTime > guestTime ? hostTime : guestTime;
+        const loserTime = hostTime > guestTime ? guestTime : hostTime;
+        return {
+          heading: `${winner.name} wins the tiebreaker!`,
+          detail: `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatTime(Math.round(winnerTime))} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatTime(Math.round(loserTime))} remaining, ${formatAccuracy(loser)} accuracy`,
+        };
+      }
       return {
-        heading: `${winner.name} wins the tiebreaker!`,
-        detail: `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatTime(Math.round(winnerTime))} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatTime(Math.round(loserTime))} remaining, ${formatAccuracy(loser)} accuracy`,
+        heading: "It's a tie!",
+        detail: `${hostP.name} and ${guestP.name} both scored ${hostP.score}.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
       };
     }
     return {
       heading: "It's a tie!",
-      detail: `${hostP.name} and ${guestP.name} both scored ${hostP.score}.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
+      detail: `${hostP.name} and ${guestP.name} both had ${formatAccuracy(hostP)} accuracy — the score difference is just from a different number of attempts.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
     };
   }
 
@@ -3497,6 +3512,85 @@ function spawnUltraInstinctDustMote(){
   anim.onfinish = () => mote.remove();
 }
 
+/* Kage Bunshin's whole gimmick — two decoy clones launched from the
+   exact same start point as the real tile (see the kage-bunshin
+   keyframe branch above, which fires this at the same instant as its
+   own launch flicker), built with the SAME `.thrown-tile` class and
+   text as the real clone rather than a dimmed/tinted copy — per the
+   design discussion, they're meant to be genuinely indistinguishable
+   from the real tile while airborne, true to how the actual jutsu
+   works, not an obviously-fake decoy. Each one fans out to one side of
+   the real tile's own path (a fixed lateral pixel offset — not proper
+   perpendicular-to-travel vector math, since a simple constant offset
+   already reads clearly as "spreading apart" for this tile's short
+   flight distances) and poofs into smoke right near the END of the
+   real tile's flight (POOF_AT), timed to land in the same beat as the
+   real tile itself (see its matching landing puff in the dispatch
+   above) rather than vanishing early mid-air, where it was easy to
+   miss entirely — only the real tile actually reaches the slot. */
+function spawnKageBunshinClones(startRect, dx, dy, tileText, fontSize, totalDuration){
+  const POOF_AT = 0.92;
+  const fanOffsets = [
+    { lateralX: 34, lateralY: -26 },
+    { lateralX: -34, lateralY: 24 },
+  ];
+
+  fanOffsets.forEach(({ lateralX, lateralY }) => {
+    const decoy = document.createElement('div');
+    decoy.className = 'thrown-tile';
+    decoy.textContent = tileText;
+    decoy.style.left = `${startRect.left}px`;
+    decoy.style.top = `${startRect.top}px`;
+    decoy.style.width = `${startRect.width}px`;
+    decoy.style.height = `${startRect.height}px`;
+    decoy.style.fontSize = fontSize;
+    document.body.appendChild(decoy);
+
+    const anim = decoy.animate([
+      { transform: 'translate(0,0) scale(1)', opacity: 1, offset: 0 },
+      { transform: `translate(${dx * POOF_AT * 0.55 + lateralX}px, ${dy * POOF_AT * 0.55 + lateralY - 30}px) scale(1.05)`, opacity: 1, offset: 0.7 },
+      { transform: `translate(${dx * POOF_AT + lateralX}px, ${dy * POOF_AT + lateralY}px) scale(0.9)`, opacity: 0, offset: 1 },
+    ], { duration: totalDuration * POOF_AT, easing: 'ease-out' });
+
+    anim.onfinish = () => {
+      const rect = decoy.getBoundingClientRect();
+      decoy.remove();
+      spawnKageBunshinPoof(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    };
+  });
+}
+
+/* The smoke-puff "reveal" when a decoy clone vanishes — a small ring
+   of 💨 glyphs scattering outward and fading fast (well under a
+   second), same real-glyph-instead-of-hand-drawn-shape approach as
+   Bankai's flame trail and Gear 5's star burst above. Deliberately
+   quick and small — this happens twice per toss (once per decoy), so
+   a bigger/slower burst here would make an ordinary correct answer
+   feel more chaotic than earned, on top of everything else already
+   happening in that instant. */
+function spawnKageBunshinPoof(x, y){
+  const count = 6;
+  for(let i = 0; i < count; i++){
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
+    const distance = 14 + Math.random() * 14;
+    const px = Math.cos(angle) * distance;
+    const py = Math.sin(angle) * distance;
+
+    const puff = document.createElement('div');
+    puff.className = 'kage-bunshin-poof';
+    puff.textContent = '\uD83D\uDCA8';
+    puff.style.left = `${x}px`;
+    puff.style.top = `${y}px`;
+    document.body.appendChild(puff);
+
+    const anim = puff.animate([
+      { transform: 'translate(-50%,-50%) translate(0,0) scale(0.5)', opacity: 0.9, offset: 0 },
+      { transform: `translate(-50%,-50%) translate(${px}px, ${py}px) scale(1.3)`, opacity: 0, offset: 1 },
+    ], { duration: 320 + Math.random() * 120, easing: 'ease-out' });
+    anim.onfinish = () => puff.remove();
+  }
+}
+
 /* Persists which effect is equipped, with an optimistic local update
    so the picker feels instant — rolled back if the write fails. */
 async function equipTileEffect(effectId){
@@ -3729,6 +3823,25 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     ];
     duration = 220; // fastest flight of any effect, on purpose — see comment above
     easing = 'linear';
+  } else if(effectId === 'kage-bunshin'){
+    // The real tile's OWN flight is deliberately plain — close to
+    // Classic Arc's shape — since the multiplicity mechanic is what
+    // makes this effect distinctive, not a fancier path for the real
+    // tile itself. The one embellishment is a quick double-flicker
+    // right at launch (a fast opacity blink), reading as the instant
+    // the clones split off rather than smooth continuous motion the
+    // whole way through. The two decoy clones are spawned separately
+    // by spawnKageBunshinClones() below, launched in the same instant
+    // as this flicker so all three appear to split from one point.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', opacity: 1, offset: 0 },
+      { transform: 'translate(0,0) scale(1.1)', opacity: 0.35, offset: 0.06 },
+      { transform: 'translate(0,0) scale(1)', opacity: 1, offset: 0.12 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) scale(1.05)`, opacity: 1, offset: 0.55 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0.85, offset: 1 },
+    ];
+    duration = 400;
+    easing = 'ease-in';
   } else { // 'classic' (also the fallback for any unrecognized effect id)
     keyframes = [
       { transform: 'translate(0,0) scale(1)', offset: 0 },
@@ -3748,10 +3861,12 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
   // Bankai's blade slash ends in a hard, screen-wide flash rather than
   // anything localized to the landing point (reflecting a "sharp full
   // flash" per the badge's difficulty rather than a subtle pulse),
-  // Gear 5 bursts with stars right at the landing point, and Ultra
+  // Gear 5 bursts with stars right at the landing point, Ultra
   // Instinct's afterimage trail is deliberately the ONLY one of these
-  // with no landing moment at all — see spawnUltraInstinctAfterimages()
-  // below for why.
+  // with no landing moment at all (see spawnUltraInstinctAfterimages()
+  // below for why), and Kage Bunshin's two decoy clones fly alongside
+  // the real tile from the very start rather than trailing behind it —
+  // see spawnKageBunshinClones() below.
   if(effectId === 'confetti-burst'){
     const landX = endRect.left + endRect.width / 2;
     const landY = endRect.top + endRect.height / 2;
@@ -3775,6 +3890,19 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     // default `anim.onfinish = () => clone.remove();` set before this
     // dispatch, with nothing extra spawned at the landing point.
     spawnUltraInstinctAfterimages(startRect, dx, dy, clone.textContent, computed.fontSize, duration);
+  } else if(effectId === 'kage-bunshin'){
+    // Unlike Sparkle Trail/Ultra Instinct above, this DOES override
+    // onfinish — the decoy poofs alone (now timed to land right at the
+    // very end of the flight, not mid-air — see POOF_AT in
+    // spawnKageBunshinClones() below) read as too easy to miss without
+    // a matching beat where the real tile itself lands, so the real
+    // tile gets its own small puff at the landing point too, giving a
+    // clear "everyone poofs" finishing moment right as the animation
+    // ends.
+    const landX = endRect.left + endRect.width / 2;
+    const landY = endRect.top + endRect.height / 2;
+    spawnKageBunshinClones(startRect, dx, dy, clone.textContent, computed.fontSize, duration);
+    anim.onfinish = () => { clone.remove(); spawnKageBunshinPoof(landX, landY); };
   }
 }
 
@@ -4545,16 +4673,30 @@ function showWinner(){
   } else {
     const [p1, p2] = state.players;
     let heading, detail;
-    if(p1.score === p2.score){
-      const timerOn = state.timeControlSeconds > 0;
-      if(timerOn && p1.timeRemaining !== p2.timeRemaining){
-        const winner = p1.timeRemaining > p2.timeRemaining ? p1 : p2;
-        const loser = p1.timeRemaining > p2.timeRemaining ? p2 : p1;
-        heading = `${winner.name} wins the tiebreaker!`;
-        detail = `Tied at ${p1.score} points — ${winner.name} had more time left.\n${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatTime(winner.timeRemaining)} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatTime(loser.timeRemaining)} remaining, ${formatAccuracy(loser)} accuracy`;
+    // isResultTie() (see results.js) calls it a tie either on matching
+    // scores (the original rule) OR matching accuracy despite
+    // different scores — e.g. 5/5 vs 6/6 are both 100% accuracy, so
+    // the score gap there is purely from one player getting an extra
+    // attempt, not from playing better. The time-based tiebreaker
+    // below still only applies when scores are ACTUALLY equal, not
+    // just accuracy — "who had more time left" only makes sense to ask
+    // when there's a genuine tied point total to break, not when the
+    // scores themselves differ.
+    if(isResultTie(p1, p2)){
+      if(p1.score === p2.score){
+        const timerOn = state.timeControlSeconds > 0;
+        if(timerOn && p1.timeRemaining !== p2.timeRemaining){
+          const winner = p1.timeRemaining > p2.timeRemaining ? p1 : p2;
+          const loser = p1.timeRemaining > p2.timeRemaining ? p2 : p1;
+          heading = `${winner.name} wins the tiebreaker!`;
+          detail = `Tied at ${p1.score} points — ${winner.name} had more time left.\n${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatTime(winner.timeRemaining)} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatTime(loser.timeRemaining)} remaining, ${formatAccuracy(loser)} accuracy`;
+        } else {
+          heading = "It's a tie!";
+          detail = `${p1.name} and ${p2.name} both scored ${p1.score}.\n${p1.name}: ${p1.score}/${maxPossibleScore(p1)} pts, ${formatAccuracy(p1)} accuracy\n${p2.name}: ${p2.score}/${maxPossibleScore(p2)} pts, ${formatAccuracy(p2)} accuracy`;
+        }
       } else {
         heading = "It's a tie!";
-        detail = `${p1.name} and ${p2.name} both scored ${p1.score}.\n${p1.name}: ${p1.score}/${maxPossibleScore(p1)} pts, ${formatAccuracy(p1)} accuracy\n${p2.name}: ${p2.score}/${maxPossibleScore(p2)} pts, ${formatAccuracy(p2)} accuracy`;
+        detail = `${p1.name} and ${p2.name} both had ${formatAccuracy(p1)} accuracy — the score difference is just from a different number of attempts.\n${p1.name}: ${p1.score}/${maxPossibleScore(p1)} pts, ${formatAccuracy(p1)} accuracy\n${p2.name}: ${p2.score}/${maxPossibleScore(p2)} pts, ${formatAccuracy(p2)} accuracy`;
       }
     } else {
       const winner = p1.score > p2.score ? p1 : p2;

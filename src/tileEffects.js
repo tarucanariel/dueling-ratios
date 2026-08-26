@@ -22,6 +22,14 @@ export const TILE_EFFECTS = [
   { id: 'warp-zoom',      name: 'Warp Zoom',       icon: '\u26A1', unlockBadgeIds: ['sharpshooter'] },
   { id: 'confetti-burst', name: 'Confetti Burst',  icon: '\uD83C\uDF89', unlockBadgeIds: ['streak-20'] },
   { id: 'sparkle-trail',  name: 'Sparkle Trail',   icon: '\u2728', unlockBadgeIds: ['operations-mastered'] },
+  // Kage Bunshin's two-badge pairing is a deliberately different FLAVOR
+  // of "two badges together" than Gear 5 (streak+combined-mastery) or
+  // Ultra Instinct (pure accuracy+volume) — Quick Thinker (speed under
+  // pressure) plus Multiplication Master (one single operation, not
+  // the combined Fraction Champion) reads as "sharp enough to pull off
+  // a technique on the fly", matching a shadow clone's whole premise
+  // of throwing out a quick decoy rather than one slow, careful throw.
+  { id: 'kage-bunshin',   name: 'Kage Bunshin',    icon: '\uD83D\uDC65', unlockBadgeIds: ['quick-thinker', 'multiplication-mastery'] },
   { id: 'bankai',         name: 'Bankai',          icon: '\uD83D\uDDE1\uFE0F', unlockBadgeIds: ['speed-master'] },
   // The only two-badge unlocks in the roster on purpose — Gear 5 and
   // Ultra Instinct are meant to read as the roster's capstones, each

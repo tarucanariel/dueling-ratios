@@ -72,3 +72,25 @@ describe('isTileEffectUnlocked — Ultra Instinct (two-badge unlock)', () => {
     expect(isTileEffectUnlocked('ultra-instinct', new Set(['streak-40', 'operations-mastered']))).toBe(false);
   });
 });
+
+describe('isTileEffectUnlocked — Kage Bunshin (two-badge unlock)', () => {
+  it('is locked with neither required badge', () => {
+    expect(isTileEffectUnlocked('kage-bunshin', new Set())).toBe(false);
+  });
+
+  it('is locked with only Quick Thinker', () => {
+    expect(isTileEffectUnlocked('kage-bunshin', new Set(['quick-thinker']))).toBe(false);
+  });
+
+  it('is locked with only Multiplication Master', () => {
+    expect(isTileEffectUnlocked('kage-bunshin', new Set(['multiplication-mastery']))).toBe(false);
+  });
+
+  it('is unlocked once both required badges are earned', () => {
+    expect(isTileEffectUnlocked('kage-bunshin', new Set(['quick-thinker', 'multiplication-mastery']))).toBe(true);
+  });
+
+  it('is not unlocked by the combined Fraction Champion badge alone — it specifically wants the single multiplication mastery, not the all-ops capstone', () => {
+    expect(isTileEffectUnlocked('kage-bunshin', new Set(['quick-thinker', 'operations-mastered']))).toBe(false);
+  });
+});

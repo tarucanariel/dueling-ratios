@@ -2235,6 +2235,21 @@ body{
   pointer-events:none;
 }
 
+/* Kage Bunshin's smoke-puff — spawned by spawnKageBunshinPoof() in
+   main.js, right where a decoy clone vanishes. A real 💨 glyph rather
+   than a hand-drawn cloud shape, same reasoning as every other
+   glyph-based particle in this file (Bankai's flames, Gear 5's stars) —
+   cheap and instantly reads as smoke. z-index sits below the tossed
+   tile/decoys themselves (999, via .thrown-tile) so a puff never
+   visually overlaps a still-airborne clone. */
+.kage-bunshin-poof{
+  position:fixed;
+  z-index:900;
+  font-size:1rem;
+  line-height:1;
+  pointer-events:none;
+}
+
 /* =========================================================
    Effect board themes — a persistent, ambient visual on the whole
    problem strip + tile pool for whichever effect is equipped, so it
@@ -2433,6 +2448,25 @@ body{
 @keyframes ultra-instinct-aura-breathe{
   0%, 100%{ opacity:0.55; transform:scale(0.97); }
   50%{ opacity:1; transform:scale(1.04); }
+}
+
+/* Kage Bunshin — deliberately the only "earthy" board theme in the
+   roster rather than a glow/aura like every other effect (Bankai's
+   red, Gear 5's gold, Ultra Instinct's silver) — grounded ninjutsu
+   rather than an aura power-up, so the pulse alternates between a
+   dusty tan and a leaf green (a nod to the Hidden Leaf Village) instead
+   of one consistent hue. */
+.effect-theme-kage-bunshin .problem-strip,
+.effect-theme-kage-bunshin .pool-tray{
+  padding:14px;
+  border-radius:16px;
+  background-color:rgba(139,111,71,0.08);
+  animation:board-kage-bunshin-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes board-kage-bunshin-pulse{
+  0%, 100%{ box-shadow:0 0 0 2px rgba(139,111,71,0.4), 0 0 12px rgba(139,111,71,0.22); }
+  50%{ box-shadow:0 0 0 2px rgba(76,175,80,0.55), 0 0 20px rgba(76,175,80,0.32); }
 }
 
 .feedback-line{
