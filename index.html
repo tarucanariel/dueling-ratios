@@ -25,7 +25,7 @@
       <button class="nav-chip" id="my-stats-btn" type="button"><span class="nav-chip-label">My Stats</span></button>
       <button class="nav-chip" id="my-classes-btn" type="button"><span class="nav-chip-label">My Classes</span></button>
       <button class="nav-chip" id="worksheet-btn" type="button"><span class="nav-chip-label">Worksheets</span></button>
-      <button class="nav-chip hidden" id="admin-feedback-btn" type="button"><span class="nav-chip-label">Feedback</span></button>
+      <button class="nav-chip hidden" id="admin-btn" type="button"><span class="nav-chip-label">Admin</span></button>
     </div>
 
     <div class="rejoin-banner hidden" id="rejoin-banner">
@@ -685,10 +685,65 @@
   </div>
 </div>
 
-<!-- Admin-only feedback viewer — chip visibility and the actual data
-     access are both gated to ADMIN_EMAIL (see teacherConfig.js and the
-     matching database.rules.json read rule). Everyone else never sees
-     the "Feedback" chip at all. -->
+<!-- Admin hub — chip visibility is gated to ADMIN_EMAIL (see
+     teacherConfig.js). Everyone else never sees the "Admin" chip at
+     all. Collects every admin-only control behind one modal. -->
+<div class="modal-overlay hidden" id="admin-modal">
+  <div class="modal chalk-panel feedback-panel">
+    <div class="instructions-header">
+      <h2 class="modal-heading">Admin</h2>
+      <button class="close-btn" id="close-admin-btn" aria-label="Close admin panel" type="button">&times;</button>
+    </div>
+    <div class="setup-links-row">
+      <button class="nav-chip" id="admin-feedback-btn" type="button"><span class="nav-chip-label">Feedback</span></button>
+    </div>
+
+    <h3 class="admin-section-heading">Teacher Allowlist</h3>
+    <p class="feedback-intro">Accounts added here get teacher access (My Classes creation + Watch Games) even without a @deped.gov.ph email — for staff whose school account isn't set up yet.</p>
+
+    <div class="class-rename-row">
+      <input type="email" id="teacher-allowlist-input" class="class-rename-input" placeholder="teacher@example.com" autocomplete="off">
+      <button class="secondary-btn" id="teacher-allowlist-add-btn" type="button">Add</button>
+    </div>
+    <p class="setup-error" id="teacher-allowlist-error"></p>
+
+    <p class="feedback-intro hidden" id="teacher-allowlist-empty">No extra teacher accounts added yet.</p>
+    <div id="teacher-allowlist-list"></div>
+
+    <h3 class="admin-section-heading">Daily Users (Last 10 Days)</h3>
+    <p class="setup-error" id="admin-visits-error"></p>
+    <div class="admin-table-scroll">
+      <table class="stats-table">
+        <thead><tr><th>Date</th><th>Teachers</th><th>Students</th><th>Guests</th><th>Total</th></tr></thead>
+        <tbody id="admin-daily-visits-body"></tbody>
+      </table>
+    </div>
+
+    <h3 class="admin-section-heading">All-Time Unique Visitors</h3>
+    <div class="admin-stat-row">
+      <div class="admin-stat-tile">
+        <span class="admin-stat-value" id="admin-alltime-teachers">—</span>
+        <span class="admin-stat-label">Teachers</span>
+      </div>
+      <div class="admin-stat-tile">
+        <span class="admin-stat-value" id="admin-alltime-students">—</span>
+        <span class="admin-stat-label">Students</span>
+      </div>
+      <div class="admin-stat-tile">
+        <span class="admin-stat-value" id="admin-alltime-guests">—</span>
+        <span class="admin-stat-label">Guests</span>
+      </div>
+      <div class="admin-stat-tile">
+        <span class="admin-stat-value" id="admin-alltime-total">—</span>
+        <span class="admin-stat-label">Total</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Admin-only feedback viewer, opened from the Admin hub above. The
+     actual data access is gated to ADMIN_EMAIL (see teacherConfig.js
+     and the matching database.rules.json read rule). -->
 <div class="modal-overlay hidden" id="admin-feedback-modal">
   <div class="modal chalk-panel feedback-panel">
     <div class="instructions-header">

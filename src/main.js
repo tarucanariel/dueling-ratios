@@ -3,7 +3,7 @@ import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
-import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow } from './firebase.js';
+import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound } from './sounds.js';
@@ -51,6 +51,7 @@ const state = {
   myBadges: new Set(), // badge ids earned by the signed-in account — see badges.js and loadMyBadges()
   myStats: null, // full per-mode stats object for the signed-in account, cached so renderMyStatsBadges() can compute "up next" progress bars without re-threading stats through every call site — see openMyStats()/loadMyBadges()/recordMyStats()
   myEquippedEffect: 'classic', // which TILE_EFFECTS entry the signed-in account has equipped — see activeTileEffectId()
+  teacherAllowlist: new Set(), // lowercased emails admin-granted teacher status outside TEACHER_EMAIL_DOMAIN — see loadTeacherAllowlist()/isTeacherAccount()
 
   // "Find Opponent" lobby (browsing waiting rooms instead of typing a code)
   unsubscribeLobby: null,
@@ -133,6 +134,20 @@ const el = {
   feedbackMessageInput: document.getElementById('feedback-message-input'),
   feedbackError: document.getElementById('feedback-error'),
   feedbackSubmitBtn: document.getElementById('feedback-submit-btn'),
+  adminBtn: document.getElementById('admin-btn'),
+  adminModal: document.getElementById('admin-modal'),
+  closeAdminBtn: document.getElementById('close-admin-btn'),
+  teacherAllowlistInput: document.getElementById('teacher-allowlist-input'),
+  teacherAllowlistAddBtn: document.getElementById('teacher-allowlist-add-btn'),
+  teacherAllowlistError: document.getElementById('teacher-allowlist-error'),
+  teacherAllowlistEmpty: document.getElementById('teacher-allowlist-empty'),
+  teacherAllowlistList: document.getElementById('teacher-allowlist-list'),
+  adminVisitsError: document.getElementById('admin-visits-error'),
+  adminDailyVisitsBody: document.getElementById('admin-daily-visits-body'),
+  adminAlltimeTeachers: document.getElementById('admin-alltime-teachers'),
+  adminAlltimeStudents: document.getElementById('admin-alltime-students'),
+  adminAlltimeGuests: document.getElementById('admin-alltime-guests'),
+  adminAlltimeTotal: document.getElementById('admin-alltime-total'),
   adminFeedbackBtn: document.getElementById('admin-feedback-btn'),
   adminFeedbackModal: document.getElementById('admin-feedback-modal'),
   closeAdminFeedbackBtn: document.getElementById('close-admin-feedback-btn'),
@@ -311,8 +326,8 @@ function clearSeat(){
    underlying Firebase Auth session either way, and nothing here makes
    any access decision based on the account — a player's Google sign-in
    never grants Watch Games access by itself (see handleTeacherGoogleSignIn,
-   which independently checks the email domain regardless of how/why the
-   user already happened to be signed in).
+   which independently checks isTeacherAccount() regardless of how/why
+   the user already happened to be signed in).
    ========================================================= */
 
 function getMyName(){
@@ -421,7 +436,7 @@ function updatePlayerIdentityUI(){
   el.googleSigninNote.classList.toggle('hidden', signedIn);
   el.playerProfileChip.classList.toggle('hidden', !signedIn);
   updateFeedbackFabVisibility();
-  el.adminFeedbackBtn.classList.toggle('hidden', !isAdminAccount());
+  el.adminBtn.classList.toggle('hidden', !isAdminAccount());
   if(signedIn){
     el.playerProfileName.textContent = state.googleUser.name;
     if(state.googleUser.photoURL){
@@ -475,13 +490,15 @@ async function handlePlayerGoogleSignOut(){
    not a problem, just a bit redundant in those cases. Anonymous
    sessions (from ensureSignedIn(), used for online play) correctly
    don't trigger this, since isGoogleUser() filters them out. */
-watchAuthState((user) => {
+watchAuthState(async (user) => {
   if(isGoogleUser(user)){
     state.googleUser = toGoogleUserRecord(user);
+    await loadTeacherAllowlist(); // awaited here so logVisitIfNeeded() below categorizes teacher vs. student correctly; the gate checks elsewhere also await their own fresh copy
   } else if(state.googleUser){
     state.googleUser = null;
   }
   updatePlayerIdentityUI();
+  logVisitIfNeeded(); // fire-and-forget — records this device/account as today's + all-time visitor, see firebase.js
 });
 
 /* =========================================================
@@ -598,10 +615,10 @@ async function openMyStats(){
 /* =========================================================
    My Classes — its own modal, opened from the "My Classes" chip on the
    opening screen (previously this content lived inside My Stats). Which
-   of the sub-blocks shows depends only on the signed-in account's email
-   domain (the same TEACHER_EMAIL_DOMAIN check the Watch Games gate
-   already uses) and, for players, whether they're currently in a class
-   at all.
+   of the sub-blocks shows depends only on the signed-in account's
+   teacher status (see isTeacherAccount() — email domain or admin
+   allowlist) and, for players, whether they're currently in a class at
+   all.
    ========================================================= */
 
 async function openMyClasses(){
@@ -611,7 +628,7 @@ async function openMyClasses(){
   if(!state.googleUser) return;
 
   try{
-    const stats = await getPlayerStats(state.googleUser.uid);
+    const [stats] = await Promise.all([getPlayerStats(state.googleUser.uid), loadTeacherAllowlist()]);
     await renderClassSection(stats);
   } catch(err){
     el.myClassesError.textContent = 'Could not load your classes. Please try again.';
@@ -653,14 +670,84 @@ async function handleMyClassesSignIn(){
   openMyClasses(); // re-render now signed in, and fetch the actual classes
 }
 
+function isTeacherEmail(email){
+  const lower = (email || '').toLowerCase();
+  if(!lower) return false;
+  return lower.endsWith('@' + TEACHER_EMAIL_DOMAIN) || state.teacherAllowlist.has(lower);
+}
+
 function isTeacherAccount(){
-  const email = (state.googleUser?.email || '').toLowerCase();
-  return email.endsWith('@' + TEACHER_EMAIL_DOMAIN);
+  return isTeacherEmail(state.googleUser?.email);
 }
 
 function isAdminAccount(){
   const email = (state.googleUser?.email || '').toLowerCase();
   return email === ADMIN_EMAIL.toLowerCase();
+}
+
+/* Refreshes state.teacherAllowlist from the database (see
+   getTeacherAllowlist in firebase.js). Called wherever isTeacherAccount()
+   is about to decide something user-visible, so an admin-added entry
+   takes effect the next time that account opens My Classes / Watch
+   Games, without needing a page reload. On failure, keeps whatever was
+   already cached rather than clearing it — a network blip shouldn't
+   revoke a session's teacher status. */
+async function loadTeacherAllowlist(){
+  try{
+    const entries = await getTeacherAllowlist();
+    state.teacherAllowlist = new Set(entries.map((e) => e.email));
+  } catch(err){
+    console.error('Failed to load teacher allowlist:', err);
+  }
+  return state.teacherAllowlist;
+}
+
+/* =========================================================
+   Visit logging — records this device/account once per page load as
+   today's + all-time unique visitor, categorized teacher/student/
+   guest (see recordVisit in firebase.js and the Admin dashboard
+   further up). Guests have no Firebase Auth identity to key off of, so
+   a random id is generated once and cached in localStorage to stand in
+   for "this device" — necessarily approximate (a cleared browser or a
+   second device counts as a new guest), but good enough for a rough
+   usage dashboard.
+   ========================================================= */
+
+const GUEST_VISITOR_ID_KEY = 'dr_guest_visitor_id';
+
+function getGuestVisitorId(){
+  try{
+    let id = localStorage.getItem(GUEST_VISITOR_ID_KEY);
+    if(!id){
+      id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      localStorage.setItem(GUEST_VISITOR_ID_KEY, id);
+    }
+    return id;
+  } catch(err){
+    return null; // localStorage unavailable (private browsing, etc.) — visit just won't be logged
+  }
+}
+
+let loggedVisitSignature = null; // 'category:key' already recorded this page load — skip repeat writes on auth token refreshes etc.
+
+async function logVisitIfNeeded(){
+  let category, key;
+  if(state.googleUser){
+    category = isTeacherAccount() ? 'teacher' : 'student';
+    key = state.googleUser.uid;
+  } else {
+    category = 'guest';
+    key = getGuestVisitorId();
+    if(!key) return;
+  }
+  const signature = `${category}:${key}`;
+  if(signature === loggedVisitSignature) return;
+  loggedVisitSignature = signature;
+  try{
+    await recordVisit(category, key);
+  } catch(err){
+    console.error('Failed to record visit:', err);
+  }
 }
 
 async function renderClassSection(myStats){
@@ -1423,6 +1510,186 @@ function closeAdminFeedbackModal(){
   el.adminFeedbackModal.classList.add('hidden');
 }
 
+function closeAdminModal(){
+  el.adminModal.classList.add('hidden');
+}
+
+/* =========================================================
+   Admin: teacher allowlist management — lets ADMIN_EMAIL grant
+   teacher status to accounts outside TEACHER_EMAIL_DOMAIN. See
+   loadTeacherAllowlist()/isTeacherEmail() for the read side that
+   every other account uses, and getTeacherAllowlist/
+   addTeacherAllowlistEntry/removeTeacherAllowlistEntry in firebase.js
+   for the actual database calls (write is admin-only per the matching
+   database.rules.json rule).
+   ========================================================= */
+
+let teacherAllowlistEntries = [];
+
+function renderTeacherAllowlistList(){
+  el.teacherAllowlistList.innerHTML = '';
+  el.teacherAllowlistEmpty.classList.toggle('hidden', teacherAllowlistEntries.length > 0);
+
+  teacherAllowlistEntries.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'teacher-allowlist-row';
+
+    const emailSpan = document.createElement('span');
+    emailSpan.className = 'teacher-allowlist-email';
+    emailSpan.textContent = entry.email;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'class-icon-btn teacher-allowlist-remove-btn';
+    removeBtn.innerHTML = ICON_TRASH;
+    removeBtn.title = 'Remove';
+    removeBtn.setAttribute('aria-label', `Remove ${entry.email} from the teacher allowlist`);
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'text-link-btn class-rename-cancel hidden';
+    cancelBtn.textContent = 'Cancel';
+    let confirming = false;
+    function resetRemoveBtn(){
+      confirming = false;
+      removeBtn.innerHTML = ICON_TRASH;
+      removeBtn.title = 'Remove';
+      removeBtn.setAttribute('aria-label', `Remove ${entry.email} from the teacher allowlist`);
+      removeBtn.disabled = false;
+      cancelBtn.classList.add('hidden');
+    }
+    removeBtn.addEventListener('click', async () => {
+      if(!confirming){
+        confirming = true;
+        removeBtn.innerHTML = ICON_CHECK;
+        removeBtn.title = 'Confirm removal';
+        removeBtn.setAttribute('aria-label', `Confirm removing ${entry.email} from the teacher allowlist`);
+        cancelBtn.classList.remove('hidden');
+        return;
+      }
+      removeBtn.disabled = true;
+      try{
+        await removeTeacherAllowlistEntry(entry.id);
+        teacherAllowlistEntries = teacherAllowlistEntries.filter((e) => e.id !== entry.id);
+        state.teacherAllowlist.delete(entry.email);
+        renderTeacherAllowlistList();
+      } catch(err){
+        console.error(`Failed to remove teacher allowlist entry ${entry.id}:`, err);
+        resetRemoveBtn();
+      }
+    });
+    cancelBtn.addEventListener('click', resetRemoveBtn);
+
+    row.append(emailSpan, removeBtn, cancelBtn);
+    el.teacherAllowlistList.appendChild(row);
+  });
+}
+
+async function loadAndRenderTeacherAllowlist(){
+  el.teacherAllowlistError.textContent = '';
+  try{
+    teacherAllowlistEntries = await getTeacherAllowlist();
+    state.teacherAllowlist = new Set(teacherAllowlistEntries.map((e) => e.email));
+    renderTeacherAllowlistList();
+  } catch(err){
+    el.teacherAllowlistError.textContent = 'Could not load the teacher allowlist. Please try again.';
+    console.error('Failed to load teacher allowlist for admin view:', err);
+  }
+}
+
+/* =========================================================
+   Admin: visit analytics dashboard — daily table (last 10 calendar
+   days) + all-time unique counts, both split teacher/student/guest.
+   This section is read-only; the actual visit writes happen
+   client-side for every visitor via logVisitIfNeeded(), defined
+   further down near the guest-visitor-id helper.
+   ========================================================= */
+
+function lastNDateKeys(n){
+  const keys = [];
+  const today = new Date();
+  for(let i = n - 1; i >= 0; i--){
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    keys.push(formatDateKey(day));
+  }
+  return keys;
+}
+
+function formatDateLabel(dateKey){
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function renderDailyVisitsTable(countsByDate){
+  el.adminDailyVisitsBody.innerHTML = '';
+  lastNDateKeys(10).reverse().forEach((dateKey) => { // newest first
+    const counts = countsByDate[dateKey] || { teacher: 0, student: 0, guest: 0 };
+    const total = counts.teacher + counts.student + counts.guest;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${formatDateLabel(dateKey)}</td><td>${counts.teacher}</td><td>${counts.student}</td><td>${counts.guest}</td><td>${total}</td>`;
+    el.adminDailyVisitsBody.appendChild(tr);
+  });
+}
+
+function renderAllTimeStats(counts){
+  el.adminAlltimeTeachers.textContent = counts.teacher;
+  el.adminAlltimeStudents.textContent = counts.student;
+  el.adminAlltimeGuests.textContent = counts.guest;
+  el.adminAlltimeTotal.textContent = counts.teacher + counts.student + counts.guest;
+}
+
+async function loadAndRenderVisitAnalytics(){
+  el.adminVisitsError.textContent = '';
+  try{
+    const [dailyCounts, allTimeCounts] = await Promise.all([getDailyVisitCounts(10), getAllTimeVisitorCounts()]);
+    renderDailyVisitsTable(dailyCounts);
+    renderAllTimeStats(allTimeCounts);
+  } catch(err){
+    el.adminVisitsError.textContent = 'Could not load visit analytics. Please try again.';
+    console.error('Failed to load visit analytics:', err);
+  }
+}
+
+async function openAdminModal(){
+  el.adminModal.classList.remove('hidden');
+  await Promise.all([loadAndRenderTeacherAllowlist(), loadAndRenderVisitAnalytics()]);
+}
+
+el.adminBtn.addEventListener('click', openAdminModal);
+el.closeAdminBtn.addEventListener('click', closeAdminModal);
+el.adminModal.addEventListener('click', (e) => {
+  if(e.target === el.adminModal) closeAdminModal();
+});
+
+el.teacherAllowlistAddBtn.addEventListener('click', async () => {
+  el.teacherAllowlistError.textContent = '';
+  const email = el.teacherAllowlistInput.value.trim().toLowerCase();
+  if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    el.teacherAllowlistError.textContent = 'Please enter a valid email address.';
+    return;
+  }
+  if(teacherAllowlistEntries.some((e) => e.email === email)){
+    el.teacherAllowlistError.textContent = 'That email is already on the list.';
+    return;
+  }
+  el.teacherAllowlistAddBtn.disabled = true;
+  try{
+    await addTeacherAllowlistEntry(email);
+    el.teacherAllowlistInput.value = '';
+    await loadAndRenderTeacherAllowlist();
+  } catch(err){
+    el.teacherAllowlistError.textContent = 'Could not add that email. Please try again.';
+    console.error('Failed to add teacher allowlist entry:', err);
+  } finally {
+    el.teacherAllowlistAddBtn.disabled = false;
+  }
+});
+el.teacherAllowlistInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    el.teacherAllowlistAddBtn.click();
+  }
+});
+
 el.adminFeedbackBtn.addEventListener('click', openAdminFeedbackModal);
 el.closeAdminFeedbackBtn.addEventListener('click', closeAdminFeedbackModal);
 el.adminFeedbackModal.addEventListener('click', (e) => {
@@ -1457,13 +1724,18 @@ el.onlineCreateBtn.addEventListener('click', () => selectOnlineChoice('create'))
 el.onlineJoinBtn.addEventListener('click', () => selectOnlineChoice('join'));
 el.onlineFindBtn.addEventListener('click', () => selectOnlineChoice('find'));
 
-el.watchGamesBtn.addEventListener('click', () => {
+el.watchGamesBtn.addEventListener('click', async () => {
   // Already signed in with an allowed teacher account (whether that
   // sign-in happened here, via My Stats, or via My Classes — it's all
   // the same Firebase session) — skip the prompt and go straight in.
-  if(state.googleUser && isTeacherAccount()){
-    openWatchList();
-    return;
+  // Refreshes the allowlist first so an admin addition takes effect
+  // immediately, without needing a page reload.
+  if(state.googleUser){
+    await loadTeacherAllowlist();
+    if(isTeacherAccount()){
+      openWatchList();
+      return;
+    }
   }
   el.teacherPinError.textContent = '';
   el.teacherPinSubmitBtn.disabled = false;
@@ -2787,11 +3059,12 @@ function handleRematchClick(){
    never calls submitRoomUpdate — a spectator's tab must never be able
    to mutate a room, only read it via listenToRoom/listenToAllRooms.
 
-   Access check: after Google sign-in, we only look at the email
-   domain (see teacherConfig.js) — same client-side-only posture as
-   the PIN this replaced (see that file's comment for why). A denied
-   account gets signed straight back out, so a rejected Google session
-   never lingers as this tab's active identity. */
+   Access check: after Google sign-in, isTeacherEmail() looks at the
+   email domain or the admin-managed allowlist (see teacherConfig.js
+   and getTeacherAllowlist in firebase.js) — same client-side-only
+   posture as the PIN this replaced (see that file's comment for why).
+   A denied account gets signed straight back out, so a rejected
+   Google session never lingers as this tab's active identity. */
 
 async function handleTeacherGoogleSignIn(){
   el.teacherPinError.textContent = '';
@@ -2810,8 +3083,8 @@ async function handleTeacherGoogleSignIn(){
     return;
   }
 
-  const email = (user.email || '').toLowerCase();
-  const allowed = email.endsWith('@' + TEACHER_EMAIL_DOMAIN);
+  await loadTeacherAllowlist();
+  const allowed = isTeacherEmail(user.email);
 
   if(allowed){
     el.teacherPinModal.classList.add('hidden');

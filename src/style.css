@@ -1168,6 +1168,81 @@ body{
   font-size:0.8rem;
 }
 
+.admin-section-heading{
+  font-family:'Inter', sans-serif;
+  font-weight:700;
+  font-size:0.95rem;
+  color:var(--chalk);
+  margin:18px 0 6px;
+}
+
+.teacher-allowlist-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:8px 10px;
+  margin-bottom:6px;
+  background:var(--slate);
+}
+
+.teacher-allowlist-email{
+  font-size:0.85rem;
+  color:var(--chalk);
+  word-break:break-all;
+}
+
+.teacher-allowlist-remove-btn{
+  color:var(--chalk-dim);
+  flex-shrink:0;
+}
+
+.teacher-allowlist-remove-btn:hover{ color:var(--bad); }
+
+.admin-table-scroll{
+  overflow-x:auto;
+  margin-bottom:4px;
+}
+
+.admin-table-scroll .stats-table{
+  min-width:360px;
+}
+
+.admin-stat-row{
+  display:flex;
+  gap:8px;
+  margin-bottom:6px;
+}
+
+.admin-stat-tile{
+  flex:1;
+  min-width:0;
+  text-align:center;
+  padding:12px 6px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--slate);
+}
+
+.admin-stat-value{
+  display:block;
+  font-family:'JetBrains Mono', monospace;
+  font-weight:700;
+  font-size:1.25rem;
+  color:var(--amber);
+}
+
+.admin-stat-label{
+  display:block;
+  font-size:0.68rem;
+  text-transform:uppercase;
+  letter-spacing:0.05em;
+  color:var(--chalk-dim);
+  margin-top:2px;
+}
+
 .instructions-header{
   display:flex;
   align-items:center;

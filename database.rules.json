@@ -30,6 +30,34 @@
         ".write": "auth != null && (newData.child('teacherUid').val() === auth.uid || data.child('teacherUid').val() === auth.uid)"
       }
     },
+    "teacherAllowlist": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.email.toLowerCase() === 'ariel.tarucan@deped.gov.ph'",
+      "$entryId": {
+        ".validate": "newData.isString() && newData.val() === newData.val().toLowerCase() && newData.val().matches(/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/)"
+      }
+    },
+    "analytics": {
+      ".read": "auth != null && auth.token.email.toLowerCase() === 'ariel.tarucan@deped.gov.ph'",
+      "dailyVisits": {
+        "$date": {
+          "$category": {
+            "$key": {
+              ".write": "($category === 'teacher' || $category === 'student' || $category === 'guest') && newData.val() === true",
+              ".validate": "newData.val() === true"
+            }
+          }
+        }
+      },
+      "allTimeVisitors": {
+        "$category": {
+          "$key": {
+            ".write": "($category === 'teacher' || $category === 'student' || $category === 'guest') && newData.val() === true",
+            ".validate": "newData.val() === true"
+          }
+        }
+      }
+    },
     "feedback": {
       ".read": "auth != null && auth.token.email.toLowerCase() === 'ariel.tarucan@deped.gov.ph'",
       "$feedbackId": {

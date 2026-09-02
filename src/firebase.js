@@ -5,7 +5,7 @@
    ========================================================= */
 
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, update, get, increment, push, onValue } from "firebase/database";
+import { getDatabase, ref, update, get, increment, push, onValue, set, query, orderByKey, limitToLast } from "firebase/database";
 import {
   getAuth, signInAnonymously, onAuthStateChanged,
   GoogleAuthProvider, signInWithPopup, signOut,
@@ -328,4 +328,107 @@ export async function getAllFeedback(){
    removing it entirely. */
 export async function deleteFeedback(feedbackId){
   await update(ref(db), { [`feedback/${feedbackId}`]: null });
+}
+
+/* =========================================================
+   Teacher allowlist — lets ADMIN_EMAIL grant "teacher" status (My
+   Classes creation + Watch Games access, see isTeacherAccount() in
+   main.js) to Google accounts outside TEACHER_EMAIL_DOMAIN, for staff
+   who don't have a deped.gov.ph address yet.
+
+   Read is open to any signed-in account (same posture as rooms/
+   classJoinCodes in database.rules.json) since a handful of staff
+   emails isn't sensitive; write is restricted to ADMIN_EMAIL via the
+   matching rule there.
+   ========================================================= */
+
+export async function getTeacherAllowlist(){
+  const snap = await get(ref(db, 'teacherAllowlist'));
+  if(!snap.exists()) return [];
+  const data = snap.val();
+  return Object.keys(data)
+    .map((id) => ({ id, email: data[id] }))
+    .sort((a, b) => a.email.localeCompare(b.email));
+}
+
+export async function addTeacherAllowlistEntry(email){
+  const trimmed = (email || '').trim().toLowerCase();
+  if(!trimmed || !trimmed.includes('@')) throw new Error('invalid-email');
+  const entryRef = push(ref(db, 'teacherAllowlist'));
+  await set(entryRef, trimmed);
+}
+
+export async function removeTeacherAllowlistEntry(entryId){
+  await update(ref(db), { [`teacherAllowlist/${entryId}`]: null });
+}
+
+/* =========================================================
+   Visit analytics — a lightweight admin-only usage dashboard, not the
+   Firebase Analytics SDK product (see the file-header comment: that's
+   deliberately not installed). Every device that opens the app writes
+   one boolean flag per (category, key) under both dailyVisits/{date}
+   and allTimeVisitors — "category" is 'teacher' | 'student' | 'guest'
+   and "key" is the signed-in account's uid for teachers/students, or a
+   random id main.js generates and caches in localStorage for guests
+   (who may have no Firebase Auth session at all). Re-writing the same
+   flag is a harmless no-op, so callers don't need to check existence
+   first — see logVisitIfNeeded() in main.js, which also memoizes per
+   page load so this only actually fires once per identity per visit.
+
+   Both writes are deliberately open to anyone, even fully signed-out
+   guests — see the matching database.rules.json rule, which only lets
+   a write set an exact (category, key) leaf to `true` and nothing
+   else. Reading either subtree back is restricted to ADMIN_EMAIL. */
+
+export function formatDateKey(date){
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+export async function recordVisit(category, key){
+  const date = formatDateKey(new Date());
+  await update(ref(db), {
+    [`analytics/dailyVisits/${date}/${category}/${key}`]: true,
+    [`analytics/allTimeVisitors/${category}/${key}`]: true,
+  });
+}
+
+/* Fetches the most recent `days` date buckets under dailyVisits (one
+   query via orderByKey+limitToLast, since 'YYYY-MM-DD' keys sort
+   chronologically) and reduces each to a per-category unique count.
+   Returns { 'YYYY-MM-DD': {teacher, student, guest} } — only for dates
+   that actually have at least one visit logged; the admin dashboard in
+   main.js fills in 0 for any of the last 10 calendar days missing
+   here. Admin-only per the database rule, same as getAllFeedback. */
+export async function getDailyVisitCounts(days = 10){
+  const snap = await get(query(ref(db, 'analytics/dailyVisits'), orderByKey(), limitToLast(days)));
+  if(!snap.exists()) return {};
+  const data = snap.val();
+  const result = {};
+  Object.keys(data).forEach((date) => {
+    const day = data[date] || {};
+    result[date] = {
+      teacher: Object.keys(day.teacher || {}).length,
+      student: Object.keys(day.student || {}).length,
+      guest: Object.keys(day.guest || {}).length,
+    };
+  });
+  return result;
+}
+
+/* Fetches the full allTimeVisitors subtree and reduces it to a
+   per-category unique count. Reads the whole thing in one call, same
+   "expected volume is small enough" reasoning as getAllFeedback —
+   revisit if this ever grows into the tens of thousands of entries. */
+export async function getAllTimeVisitorCounts(){
+  const snap = await get(ref(db, 'analytics/allTimeVisitors'));
+  if(!snap.exists()) return { teacher: 0, student: 0, guest: 0 };
+  const data = snap.val();
+  return {
+    teacher: Object.keys(data.teacher || {}).length,
+    student: Object.keys(data.student || {}).length,
+    guest: Object.keys(data.guest || {}).length,
+  };
 }
