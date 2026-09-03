@@ -126,6 +126,7 @@ const el = {
   instructionsBtn: document.getElementById('instructions-btn'),
   closeInstructionsBtn: document.getElementById('close-instructions-btn'),
   creditsPhoto: document.getElementById('credits-photo'),
+  homeFab: document.getElementById('home-fab'),
   feedbackFab: document.getElementById('feedback-fab'),
   feedbackModal: document.getElementById('feedback-modal'),
   closeFeedbackBtn: document.getElementById('close-feedback-btn'),
@@ -435,7 +436,7 @@ function updatePlayerIdentityUI(){
   el.playerGoogleSigninBtn.classList.toggle('hidden', signedIn);
   el.googleSigninNote.classList.toggle('hidden', signedIn);
   el.playerProfileChip.classList.toggle('hidden', !signedIn);
-  updateFeedbackFabVisibility();
+  updateFabVisibility();
   el.adminBtn.classList.toggle('hidden', !isAdminAccount());
   if(signedIn){
     el.playerProfileName.textContent = state.googleUser.name;
@@ -1335,27 +1336,74 @@ el.instructionsModal.addEventListener('click', (e) => {
 el.creditsPhoto.src = creditsPhotoUrl;
 
 /* =========================================================
-   Feedback FAB — only visible when BOTH:
-     (a) signed in with a Google account, AND
-     (b) the opening/setup screen (#setup-modal) is the thing currently
-         showing — not mid-game, not while some other modal is open.
+   Corner FABs (home + feedback) — both only visible while the
+   opening/setup screen (#setup-modal) is the thing actually on top:
+     - home-fab: no other condition, anyone landing on the setup
+       screen can jump to the hub site.
+     - feedback-fab: additionally requires a signed-in Google account.
+
+   "On top" means #setup-modal is not hidden AND no OTHER .modal-overlay
+   is open over it — #setup-modal never actually hides itself when a
+   sub-modal (Instructions, My Stats, Worksheets, Admin, etc.) opens,
+   they just stack, so checking #setup-modal alone left both FABs
+   floating above whatever modal happened to be open.
 
    Rather than patch every one of the ~15 places elsewhere in this file
-   that show/hide #setup-modal, a MutationObserver watches its class
-   attribute directly and re-evaluates from there. That keeps this
-   correct automatically regardless of which code path changes the
-   setup screen's visibility, now or in the future — no risk of a
-   missed call site leaving the FAB visible somewhere it shouldn't be.
-   ========================================================= */
+   that show/hide modals, a MutationObserver watches every modal's
+   class attribute directly and re-evaluates from there. That keeps
+   this correct automatically regardless of which code path changes a
+   modal's visibility, now or in the future (new modals included, since
+   the observer list below is queried by class, not hardcoded by id) —
+   no risk of a missed call site leaving a FAB visible somewhere it
+   shouldn't be. */
 
-function updateFeedbackFabVisibility(){
-  const onSetupScreen = !el.setupModal.classList.contains('hidden');
-  const signedIn = !!state.googleUser;
-  el.feedbackFab.classList.toggle('hidden', !(signedIn && onSetupScreen));
+function isSetupScreenOnTop(){
+  const setupVisible = !el.setupModal.classList.contains('hidden');
+  const anotherModalOpen = Array.from(document.querySelectorAll('.modal-overlay'))
+    .some(modal => modal !== el.setupModal && !modal.classList.contains('hidden'));
+  return setupVisible && !anotherModalOpen;
 }
 
-new MutationObserver(updateFeedbackFabVisibility)
-  .observe(el.setupModal, { attributes: true, attributeFilter: ['class'] });
+function updateFabVisibility(){
+  const onSetupScreen = isSetupScreenOnTop();
+  el.homeFab.classList.toggle('hidden', !onSetupScreen);
+  el.feedbackFab.classList.toggle('hidden', !(!!state.googleUser && onSetupScreen));
+}
+
+document.querySelectorAll('.modal-overlay').forEach(modal => {
+  new MutationObserver(updateFabVisibility)
+    .observe(modal, { attributes: true, attributeFilter: ['class'] });
+});
+
+/* Home FAB — numeracyduels.com is blocked on DepEd-managed laptops (the
+   admin-configured browser/network filters students use in class), but
+   the same site's Firebase default domain isn't, so a short reachability
+   probe decides which one to send the visitor to. mode:'no-cors' is the
+   point: the fetch promise resolves as soon as the network layer reaches
+   the server, even for a response we're not allowed to read the body/
+   status of — it only rejects on a true network-level failure (DNS
+   block, connection refused), which is exactly the "can this domain be
+   reached at all" signal needed here, independent of what page it
+   returns. The 1.2s timeout covers the case where the network request
+   just hangs (e.g. a silent DNS sinkhole) instead of failing outright. */
+const HOME_URL_PRIMARY = 'https://numeracyduels.com/';
+const HOME_URL_FALLBACK = 'https://numeracyduels.web.app/';
+
+function goHome(){
+  let settled = false;
+  const navigate = (url) => {
+    if(settled) return;
+    settled = true;
+    window.location.href = url;
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => { controller.abort(); navigate(HOME_URL_FALLBACK); }, 1200);
+  fetch(HOME_URL_PRIMARY, { mode: 'no-cors', signal: controller.signal })
+    .then(() => { clearTimeout(timer); navigate(HOME_URL_PRIMARY); })
+    .catch(() => { clearTimeout(timer); navigate(HOME_URL_FALLBACK); });
+}
+
+el.homeFab.addEventListener('click', goHome);
 
 function openFeedbackModal(){
   el.feedbackFormView.classList.remove('hidden');

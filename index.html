@@ -659,10 +659,21 @@
      which screen or which of the two profile chips triggered it. -->
 <div class="badge-tooltip hidden" id="badge-tooltip" role="tooltip"></div>
 
+<!-- Home FAB — jumps out to the Numeracy Duels hub site. Visible any
+     time the opening/setup screen is the thing on top (no sign-in
+     required, unlike the feedback FAB below); see updateFabVisibility
+     in main.js. -->
+<button class="corner-fab home-fab hidden" id="home-fab" type="button" aria-label="Go to Numeracy Duels home">
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 11 12 4l8 7"/>
+    <path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/>
+  </svg>
+</button>
+
 <!-- Feedback FAB — only shown to signed-in Google accounts (see
-     updatePlayerIdentityUI in main.js). Fixed to the viewport, not
+     updateFabVisibility in main.js). Fixed to the viewport, not
      inside game-wrap, so it stays put across every screen. -->
-<button class="feedback-fab hidden" id="feedback-fab" type="button" aria-label="Send feedback or suggestions">
+<button class="corner-fab feedback-fab hidden" id="feedback-fab" type="button" aria-label="Send feedback or suggestions">
   💬
 </button>
 

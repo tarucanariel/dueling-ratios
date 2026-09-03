@@ -1020,10 +1020,11 @@ body{
   max-width:560px;
 }
 
-.feedback-fab{
+/* Shared corner-FAB look for the feedback and home buttons — same size/
+   shape/gradient/hover language, just anchored to different corners via
+   .feedback-fab (bottom-right) / .home-fab (top-right) below. */
+.corner-fab{
   position:fixed;
-  right:20px;
-  bottom:20px;
   z-index:60;
   width:52px;
   height:52px;
@@ -1041,12 +1042,15 @@ body{
   transition:transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.feedback-fab:hover{
+.corner-fab:hover{
   transform:scale(1.08);
   box-shadow:0 10px 28px rgba(124,127,242,0.55);
 }
 
-.feedback-fab.hidden{ display:none; }
+.corner-fab.hidden{ display:none; }
+
+.feedback-fab{ right:20px; bottom:20px; }
+.home-fab{ right:20px; top:20px; }
 
 .feedback-panel{
   max-width:420px;
@@ -2649,7 +2653,9 @@ body{
   .row-numerator, .row-denominator{ gap:4px; }
   .inline-op{ font-size:0.85rem; padding:0; }
 
-  .feedback-fab{ width:42px; height:42px; font-size:1.15rem; right:14px; bottom:14px; }
+  .corner-fab{ width:42px; height:42px; font-size:1.15rem; }
+  .feedback-fab{ right:14px; bottom:14px; }
+  .home-fab{ right:14px; top:14px; }
 }
 
 /* Below ~430px, the board needs every bit of width it can get, so the
