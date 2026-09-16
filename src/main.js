@@ -3,7 +3,7 @@ import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
-import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts } from './firebase.js';
+import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound } from './sounds.js';
@@ -52,6 +52,7 @@ const state = {
   myStats: null, // full per-mode stats object for the signed-in account, cached so renderMyStatsBadges() can compute "up next" progress bars without re-threading stats through every call site — see openMyStats()/loadMyBadges()/recordMyStats()
   myEquippedEffect: 'classic', // which TILE_EFFECTS entry the signed-in account has equipped — see activeTileEffectId()
   teacherAllowlist: new Set(), // lowercased emails admin-granted teacher status outside TEACHER_EMAIL_DOMAIN — see loadTeacherAllowlist()/isTeacherAccount()
+  homeVisible: true, // admin-controlled: whether the Home FAB is shown at all — see watchHomeVisibility() below and updateFabVisibility()
 
   // "Find Opponent" lobby (browsing waiting rooms instead of typing a code)
   unsubscribeLobby: null,
@@ -137,6 +138,7 @@ const el = {
   feedbackSubmitBtn: document.getElementById('feedback-submit-btn'),
   adminBtn: document.getElementById('admin-btn'),
   adminModal: document.getElementById('admin-modal'),
+  adminHomeVisibleCheckbox: document.getElementById('admin-home-visible-checkbox'),
   closeAdminBtn: document.getElementById('close-admin-btn'),
   teacherAllowlistInput: document.getElementById('teacher-allowlist-input'),
   teacherAllowlistAddBtn: document.getElementById('teacher-allowlist-add-btn'),
@@ -1366,13 +1368,31 @@ function isSetupScreenOnTop(){
 
 function updateFabVisibility(){
   const onSetupScreen = isSetupScreenOnTop();
-  el.homeFab.classList.toggle('hidden', !onSetupScreen);
+  el.homeFab.classList.toggle('hidden', !(onSetupScreen && state.homeVisible));
   el.feedbackFab.classList.toggle('hidden', !(!!state.googleUser && onSetupScreen));
 }
 
 document.querySelectorAll('.modal-overlay').forEach(modal => {
   new MutationObserver(updateFabVisibility)
     .observe(modal, { attributes: true, attributeFilter: ['class'] });
+});
+
+/* Live-syncs state.homeVisible (and the admin checkbox that controls it)
+   from settings/homeVisible — fires immediately on page load with
+   whatever value is already in the database, then again on every future
+   change, including one made by the admin from a different tab/device,
+   so the Home FAB's presence updates everywhere without a reload. */
+watchHomeVisibility((visible) => {
+  state.homeVisible = visible;
+  el.adminHomeVisibleCheckbox.checked = visible;
+  updateFabVisibility();
+});
+
+el.adminHomeVisibleCheckbox.addEventListener('change', () => {
+  setHomeVisibility(el.adminHomeVisibleCheckbox.checked).catch((err) => {
+    console.error('Failed to update Home icon visibility:', err);
+    el.adminHomeVisibleCheckbox.checked = state.homeVisible; // revert on failure
+  });
 });
 
 /* Home FAB — numeracyduels.com is blocked on DepEd-managed laptops (the

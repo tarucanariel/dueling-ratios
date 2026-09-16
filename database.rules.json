@@ -30,6 +30,13 @@
         ".write": "auth != null && (newData.child('teacherUid').val() === auth.uid || data.child('teacherUid').val() === auth.uid)"
       }
     },
+    "settings": {
+      "homeVisible": {
+        ".read": true,
+        ".write": "auth != null && auth.token.email.toLowerCase() === 'ariel.tarucan@deped.gov.ph'",
+        ".validate": "newData.isBoolean()"
+      }
+    },
     "teacherAllowlist": {
       ".read": "auth != null",
       ".write": "auth != null && auth.token.email.toLowerCase() === 'ariel.tarucan@deped.gov.ph'",

@@ -363,6 +363,25 @@ export async function removeTeacherAllowlistEntry(entryId){
 }
 
 /* =========================================================
+   Home site visibility — a single admin-controlled flag that shows or
+   hides the Home FAB (see updateFabVisibility() in main.js). Read is
+   open to everyone, signed-in or not, since the FAB can be on screen
+   before any auth has happened; write is restricted to ADMIN_EMAIL, same
+   posture as teacherAllowlist above. Missing/undefined defaults to
+   visible (true) so a fresh database with no admin action yet behaves
+   the same as "on". ========================================= */
+
+export function watchHomeVisibility(callback){
+  return onValue(ref(db, 'settings/homeVisible'), (snap) => {
+    callback(snap.val() !== false);
+  });
+}
+
+export async function setHomeVisibility(visible){
+  await set(ref(db, 'settings/homeVisible'), !!visible);
+}
+
+/* =========================================================
    Visit analytics — a lightweight admin-only usage dashboard, not the
    Firebase Analytics SDK product (see the file-header comment: that's
    deliberately not installed). Every device that opens the app writes
