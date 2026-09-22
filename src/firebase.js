@@ -129,6 +129,13 @@ export function ensureSignedIn(){
    teacher gate; player stats and player login have no such gate, any
    Google account works). */
 const googleProvider = new GoogleAuthProvider();
+/* Without this, signInWithPopup() silently re-signs-in as whichever
+   Google account is still active in the browser's own Google session —
+   even after signOutUser() has cleared the Firebase Auth session (e.g.
+   via "Not you?"). Forcing the account chooser on every call is what
+   actually lets a second person on the same device pick a different
+   Google account. */
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export async function signInWithGoogle(){
   await authReady;
