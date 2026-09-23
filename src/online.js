@@ -3,8 +3,12 @@
    Data model:
      /rooms/{code}/
        status: "waiting" | "active" | "finished"
-       endReason: "completed" | "timeout" (only once finished)
+       endReason: "completed" | "timeout" | "forfeit" (only once finished)
        timedOutRole: "host" | "guest" (only if endReason is "timeout")
+       forfeitedRole: "host" | "guest" (only if endReason is "forfeit" — see
+         FORFEIT_AFTER_MS below; distinct from timedOutRole since a forfeit
+         is presence-based and fires regardless of whether time control is
+         even on, unlike a timeout)
        settings: { allowedOps, totalPairs, allowNegatives, timeControlSeconds }
        players: { host: {name,score}, guest?: {name,score} }
        turn: "host" | "guest"
@@ -77,6 +81,17 @@ export const REJOIN_WINDOW_MS = 10 * 60 * 1000;
 const STALE_ACTIVE_BOTH_GONE_MS = REJOIN_WINDOW_MS + 2 * 60 * 1000; // presence confirms BOTH disconnected
 
 const STALE_FINISHED_MS = 60 * 60 * 1000; // finished games are just DB clutter after this long
+
+/* How long the still-connected player has to wait, once their opponent's
+   presence flips to disconnected, before the game can be auto-finished as
+   a forfeit win — see checkOnlineForfeit() in main.js. Deliberately much
+   shorter than REJOIN_WINDOW_MS: a stalled game blocks a classroom period
+   in a way an unclaimed seat doesn't, and 2 minutes is plenty of room for
+   a genuine reload-and-click-Rejoin. Applies whether or not time control
+   is on — a disconnect already pauses the ticking clock (see onRoomUpdate
+   in main.js), so without this, a disconnected opponent would otherwise
+   freeze a timed game forever too, not just an untimed one. */
+export const FORFEIT_AFTER_MS = 2 * 60 * 1000;
 
 function generateRoomCode(){
   let code = '';

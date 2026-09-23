@@ -1,6 +1,6 @@
 import './style.css';
 import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
-import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
+import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, FORFEIT_AFTER_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
 import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
@@ -2629,7 +2629,8 @@ function onRoomUpdate(room){
 
     if(!opponentConnected){
       const opponentName = opponentRole === 'host' ? hostP.name : guestP.name;
-      el.presenceBanner.textContent = `\u26A0\uFE0F ${opponentName} disconnected${timerOn ? ' — clock paused' : ''}`;
+      const forfeitMinutes = Math.round(FORFEIT_AFTER_MS / 60000);
+      el.presenceBanner.textContent = `\u26A0\uFE0F ${opponentName} disconnected${timerOn ? ' — clock paused' : ''} — you win if they don't return within ${forfeitMinutes} min`;
       el.presenceBanner.classList.remove('hidden');
     } else {
       el.presenceBanner.classList.add('hidden');
@@ -2668,11 +2669,11 @@ function onRoomUpdate(room){
   el.rematchBtn.disabled = false;
   state.rematchFinalizing = false;
 
-  if(timerOn){
-    if(!state.onlineTimerPollId) startOnlineTimerPoll();
-  } else {
-    stopOnlineTimerPoll();
-  }
+  // Polled regardless of timerOn now — the chess-clock display/timeout
+  // check inside tickOnlineTimer() stays timer-only, but the forfeit
+  // check it also drives applies to every active online game (see
+  // checkOnlineForfeit()'s doc comment).
+  if(!state.onlineTimerPollId) startOnlineTimerPoll();
 
   el.setupModal.classList.add('hidden');
   el.gameScreen.classList.remove('hidden');
@@ -2931,7 +2932,12 @@ function handleTimeOut(playerIndex){
    Both devices poll independently, so a timeout still gets reported
    even if whoever ran out of time has gone quiet (closed tab, lost
    connection, etc.) — by design, their clock keeps running either way.
-   ========================================================= */
+
+   This same poll also drives checkOnlineForfeit() below (a presence
+   check, unrelated to the chess clock) — see startOnlineTimerPoll's
+   call sites: it now starts for every active online game, timed or
+   not, rather than only when a timer is configured. The name stuck
+   from when it was timer-only; it's really "the active-game poll" now. */
 
 function startOnlineTimerPoll(){
   stopOnlineTimerPoll(); // safety: never allow two intervals to stack
@@ -2948,7 +2954,12 @@ function stopOnlineTimerPoll(){
 
 function tickOnlineTimer(){
   const room = state.room;
-  if(!room || room.status !== 'active' || !room.turnDeadline) return;
+  if(!room || room.status !== 'active') return;
+
+  checkOnlineForfeit();
+  if(!state.room || state.room.status !== 'active') return; // may have just finished
+
+  if(!room.turnDeadline) return; // no time control (or paused for a disconnected opponent) — nothing to tick/check
 
   checkOnlineTimeout();
   if(!state.room || state.room.status !== 'active') return; // may have just finished
@@ -2984,6 +2995,36 @@ function checkOnlineTimeout(){
   }).catch(() => { /* if this device loses the race, the other device's report still lands */ });
 }
 
+/* Forfeit-by-disconnect — the backstop for a game that would otherwise
+   stall forever once an opponent vanishes (closed tab, dead wifi, or
+   just reloaded and never clicked "Rejoin"). Applies regardless of
+   whether time control is on: a disconnect already pauses the ticking
+   clock (see the presence-pause block in onRoomUpdate), so a timed
+   game freezes exactly the same way an untimed one does once the
+   opponent is gone — this check is what actually unsticks either case.
+
+   Only ever evaluated from MY still-connected device, checking MY
+   opponent's presence — the disconnected side, by definition, isn't
+   running this poll. FORFEIT_AFTER_MS (see online.js) is measured from
+   presence.lastSeen, the moment onDisconnect fired for them, not from
+   whenever I happen to notice — so both players' devices agree on
+   when the window closes regardless of when either tab is in focus. */
+function checkOnlineForfeit(){
+  const room = state.room;
+  if(!room || room.status !== 'active' || !state.myRole) return;
+
+  const opponentRole = state.myRole === 'host' ? 'guest' : 'host';
+  const presence = room.presence?.[opponentRole];
+  if(!presence || presence.connected !== false || !presence.lastSeen) return;
+  if(serverNow() - presence.lastSeen < FORFEIT_AFTER_MS) return;
+
+  submitRoomUpdate(state.roomCode, {
+    status: 'finished',
+    endReason: 'forfeit',
+    forfeitedRole: opponentRole,
+  }).catch(() => { /* best-effort — the opponent's tab is gone and can't report this itself, but the next poll tick (mine, 500ms later) will just retry */ });
+}
+
 function showOnlineWinnerModal(room){
   stopOnlineTimerPoll();
   el.gameScreen.classList.add('hidden');
@@ -3009,6 +3050,16 @@ function getOnlineResultText(room){
     return {
       heading: `${winner.name} wins on time!`,
       detail: `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
+    };
+  }
+
+  if(room.endReason === 'forfeit'){
+    const forfeitedRole = room.forfeitedRole;
+    const forfeitedPlayer = forfeitedRole === 'host' ? hostP : guestP;
+    const winner = forfeitedRole === 'host' ? guestP : hostP;
+    return {
+      heading: `${winner.name} wins!`,
+      detail: `${forfeitedPlayer.name} disconnected and didn't return.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
     };
   }
 
@@ -3297,7 +3348,13 @@ function renderSpectatorRoom(room){
   state.currentPlayer = room.turn === 'host' ? 0 : 1;
 
   const prevGuestPresent = !!prevRoom?.players?.guest;
-  if(!prevGuestPresent && guestP) announceGameStart(activeTileEffectId());
+  // Guarded on prevRoom being non-null so this only fires for a guest
+  // joining *while already being watched* — not on the very first
+  // render after clicking Watch, where prevRoom is still null and the
+  // game (being 'active'/watchable at all) already has both players,
+  // which would otherwise replay the start cue for a game that began
+  // long before the teacher tuned in.
+  if(prevRoom && !prevGuestPresent && guestP) announceGameStart(activeTileEffectId());
   if(prevRoom && room.pairIndex > prevRoom.pairIndex) playSound('next');
   if(prevRoom && prevRoom.status !== 'finished' && room.status === 'finished') playSound('winner');
   // Unlike onRoomUpdate's version of this same check, a spectator has
