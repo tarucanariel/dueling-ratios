@@ -143,3 +143,87 @@ export function playCorrectSound(effectId){
   instance.volume = DEFAULT_VOLUME;
   instance.play().catch(() => { /* autoplay restriction — ignore */ });
 }
+
+/* Synthesized "heckle" laugh — built live with the Web Audio API rather
+   than loaded from a file, so there's no asset to import. Each "ha" is a
+   sawtooth "voice" through two bandpass formant filters (the "ah" vowel)
+   plus a short burst of high-passed noise for the breathy "h", with a
+   fast vibrato for the mocking wobble; the syllables step down in pitch
+   and volume like a real laugh trailing off.
+
+   One AudioContext is created lazily and reused — browsers cap how many
+   can exist, and creating it on first use (always after the player's
+   Start Game click) keeps it clear of the autoplay restriction. Any
+   failure (no Web Audio support, a suspended context that refuses to
+   resume) silently no-ops, same as playSound()'s .catch(). */
+let laughCtx = null;
+
+export function playHeckleLaugh(){
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if(!AudioCtx) return;
+    if(!laughCtx) laughCtx = new AudioCtx();
+    if(laughCtx.state === 'suspended') laughCtx.resume().catch(() => {});
+    const ctx = laughCtx;
+
+    const out = ctx.createGain();
+    out.gain.value = DEFAULT_VOLUME * 0.5;
+    out.connect(ctx.destination);
+
+    const noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.1), ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for(let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
+
+    const syllables = 6;
+    let t = ctx.currentTime + 0.05;
+    for(let i = 0; i < syllables; i++){
+      const dur = 0.11 + Math.random() * 0.03;
+      const pitch = 330 - i * 22 + Math.random() * 15;
+      const vol = 1 - i * 0.1;
+
+      // voiced "a"
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(pitch * 1.08, t);
+      osc.frequency.exponentialRampToValueAtTime(pitch * 0.85, t + dur);
+
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.value = 18;
+      lfoGain.gain.value = pitch * 0.04;
+      lfo.connect(lfoGain).connect(osc.frequency);
+
+      const f1 = ctx.createBiquadFilter();
+      f1.type = 'bandpass'; f1.frequency.value = 800; f1.Q.value = 6;
+      const f2 = ctx.createBiquadFilter();
+      f2.type = 'bandpass'; f2.frequency.value = 1200; f2.Q.value = 8;
+
+      const vEnv = ctx.createGain();
+      vEnv.gain.setValueAtTime(0, t);
+      vEnv.gain.linearRampToValueAtTime(vol, t + 0.02);
+      vEnv.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+      osc.connect(f1).connect(vEnv);
+      osc.connect(f2).connect(vEnv);
+      vEnv.connect(out);
+
+      // breathy "h" onset
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 1500;
+      const nEnv = ctx.createGain();
+      nEnv.gain.setValueAtTime(vol * 0.5, t);
+      nEnv.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+      noise.connect(hp).connect(nEnv).connect(out);
+
+      osc.start(t); osc.stop(t + dur + 0.02);
+      lfo.start(t); lfo.stop(t + dur + 0.02);
+      noise.start(t); noise.stop(t + 0.05);
+
+      t += dur + 0.04 + Math.random() * 0.02;
+    }
+  } catch {
+    /* no Web Audio / blocked — ignore */
+  }
+}

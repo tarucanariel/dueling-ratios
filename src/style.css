@@ -1457,8 +1457,49 @@ body{
   box-shadow:0 8px 24px rgba(200,80,255,0.5);
 }
 
+/* vs Computer heckle — the computer laughing at an easy miss (see
+   heckle() in main.js). Gunmetal instead of a streak color, and a
+   jittery shake so it reads as mocking rather than celebrating. */
+.streak-popup.heckle{
+  background:linear-gradient(135deg, rgba(90,100,115,0.95), rgba(40,45,55,0.95));
+  box-shadow:0 8px 24px rgba(0,0,0,0.45);
+  border:2px solid rgba(120,230,255,0.7);
+}
+
 .streak-popup.streak-pop-in{
   animation:streakPop 1.5s ease forwards;
+}
+
+/* Perched on the top edge of the Computer's name card (#chip-p2) rather
+   than centered over the board like the streak popups. Anchored to the
+   card's RIGHT edge, not centered on it — the card sits at the right of
+   the screen, and a centered pill wider than the card would spill past
+   the viewport on phones. */
+.streak-popup.chip-heckle{
+  top:auto;
+  left:auto;
+  right:-6px;
+  bottom:calc(100% - 8px);
+  padding:6px 14px;
+  font-size:0.9rem;
+  transform-origin:bottom right;
+}
+
+.streak-popup.heckle.streak-pop-in{
+  animation:heckleShake 1.5s ease forwards;
+}
+
+@keyframes heckleShake{
+  0%{ opacity:0; transform:translateY(10px) scale(0.8); }
+  10%{ opacity:1; transform:translateY(0) scale(1.1) rotate(0deg); }
+  18%{ transform:scale(1) rotate(-6deg); }
+  26%{ transform:rotate(6deg); }
+  34%{ transform:rotate(-5deg); }
+  42%{ transform:rotate(5deg); }
+  50%{ transform:rotate(-3deg); }
+  58%{ transform:rotate(0deg); }
+  80%{ opacity:1; transform:translateY(0) scale(1); }
+  100%{ opacity:0; transform:translateY(-8px) scale(0.92); }
 }
 
 @keyframes streakPop{
@@ -1473,6 +1514,16 @@ body{
   .streak-popup.streak-pop-in{
     animation:streakPopReduced 1.5s ease forwards;
   }
+  .streak-popup.heckle.streak-pop-in{
+    animation:hecklePopReduced 1.5s ease forwards;
+  }
+}
+
+@keyframes hecklePopReduced{
+  0%{ opacity:0; }
+  12%{ opacity:1; }
+  78%{ opacity:1; }
+  100%{ opacity:0; }
 }
 
 @keyframes streakPopReduced{
@@ -1744,6 +1795,7 @@ body{
   border:2px solid transparent;
   min-width:110px;
   transition: border-color 0.2s, box-shadow 0.2s;
+  position:relative; /* anchor for the vs-Computer heckle popup */
 }
 
 .player-chip.active-turn{

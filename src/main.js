@@ -6,7 +6,7 @@ import { ref, remove } from 'firebase/database';
 import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
-import { playSound, playCorrectSound, playStartSound } from './sounds.js';
+import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './sounds.js';
 import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
 import { isResultTie } from './results.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
@@ -190,6 +190,7 @@ const el = {
   poolTray: document.getElementById('pool-tray'),
   feedbackLine: document.getElementById('feedback-line'),
   streakPopup: document.getElementById('streak-popup'),
+  hecklePopup: document.getElementById('heckle-popup'),
   badgePopup: document.getElementById('badge-popup'),
   badgeTooltip: document.getElementById('badge-tooltip'),
 
@@ -4845,6 +4846,41 @@ function updateTurnFlag(){
    Tile interaction (local modes)
    ========================================================= */
 
+/* The computer's heckle laugh — Against Computer only, only at the human
+   (players[0]; the computer never laughs at itself), and only for the
+   "easy" blanks: ones that just copy a number already printed in the
+   problem, no arithmetic involved (see the cell keys in logic.js).
+   Conceptual steps — LCD, multipliers, products, GCF, sign rewrites and
+   the division flip — are real mistakes, not careless ones, so they
+   never get laughed at. Even then it's a 60% roll, so a struggling
+   student doesn't hear it on every single slip. */
+const HECKLE_CELL_KEYS = new Set(['num1', 'num2', 'denom', 'restateA', 'restateC', 'crossA', 'crossB']);
+const HECKLE_CHANCE = 0.6;
+const HECKLE_DELAY_MS = 350; // let the "wrong" buzz land first
+
+function shouldHeckle(activeCell){
+  return state.mode === 'computer'
+    && state.currentPlayer === 0
+    && HECKLE_CELL_KEYS.has(activeCell.key)
+    && Math.random() < HECKLE_CHANCE;
+}
+
+// Laugh + a robot popup perched on the Computer's own name card
+// (#heckle-popup lives inside #chip-p2), styled like a streak popup but
+// separate from it so the two never cut each other off.
+function heckle(){
+  playHeckleLaugh();
+  el.hecklePopup.textContent = '\u{1F916} HA-HA-HA!';
+  el.hecklePopup.classList.remove('hidden', 'streak-pop-in');
+  void el.hecklePopup.offsetWidth; // force reflow so re-adding the class restarts the CSS animation
+  el.hecklePopup.classList.add('streak-pop-in');
+}
+
+el.hecklePopup.addEventListener('animationend', () => {
+  el.hecklePopup.classList.add('hidden');
+  el.hecklePopup.classList.remove('streak-pop-in');
+});
+
 function handleTileClick(tileId){
   if(state.inputLocked) return; // ignore any click while a previous one is still resolving
   const tileIdx = state.pool.findIndex(t => t.id === tileId);
@@ -4905,6 +4941,7 @@ function handleTileClick(tileId){
   } else {
     playSound('wrong');
     animateTileThrow(tileEl, slotEls[0], 'wrong');
+    if(shouldHeckle(activeCell)) setTimeout(heckle, HECKLE_DELAY_MS);
     player.score -= 1;
     player.wrongCount += 1;
     player.streak = 0;
