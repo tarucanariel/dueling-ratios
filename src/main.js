@@ -5164,6 +5164,14 @@ const COMPUTER_DIFFICULTY = {
   hard:   { errorChance: 0.05, minDelayMs: 700,  maxDelayMs: 1600 },
 };
 
+/* Ratio Dash bots answer a whole fraction question per move, so they get
+   their own, slower table instead of sharing the vs-Computer one. */
+const DASH_BOT_SKILL = {
+  easy:   { errorChance: 0.35, minDelayMs: 4500, maxDelayMs: 8000 },
+  medium: { errorChance: 0.22, minDelayMs: 3200, maxDelayMs: 5500 },
+  hard:   { errorChance: 0.12, minDelayMs: 2200, maxDelayMs: 4000 },
+};
+
 function maybeScheduleComputerTurn(){
   if(state.mode !== 'computer' || state.currentPlayer !== 1) return;
   const { minDelayMs, maxDelayMs } = COMPUTER_DIFFICULTY[state.difficulty];
@@ -5586,9 +5594,9 @@ function handleDashWaitTimeout(){
    Bots are ordinary player entries in the race (see buildBotEntry in
    dashRace.js), played by the HOST's client: every ~0.4s it checks which
    bots are due a move and writes their new position, so everyone sees
-   them race through the same snapshot as real players. They answer like
-   the vs-Computer opponent does — same skill table, with a little
-   per-bot variation in pace. If the host closes their tab mid-race the
+   them race through the same snapshot as real players. They use their
+   own skill table (DASH_BOT_SKILL), with a little per-bot variation in
+   pace. If the host closes their tab mid-race the
    bots stop where they are; they carry on if the host rejoins. */
 
 function startDashBots(){
@@ -5603,7 +5611,7 @@ function startDashBots(){
 function tickDashBots(){
   const d = state.dash;
   if(!d || d.ending || !d.began || !d.race) return;
-  const skill = COMPUTER_DIFFICULTY[d.race.settings.botSkill] || COMPUTER_DIFFICULTY.medium;
+  const skill = DASH_BOT_SKILL[d.race.settings.botSkill] || DASH_BOT_SKILL.medium;
   const now = Date.now();
 
   Object.values(d.race.players).filter(p => p.isBot && !p.finished).forEach((bot) => {
