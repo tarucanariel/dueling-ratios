@@ -9,7 +9,7 @@
       "$code": {
         ".write": "auth != null && ((!data.exists() && newData.child('hostUid').val() === auth.uid && newData.child('status').val() === 'waiting') || (data.exists() && !newData.exists() && (data.child('hostUid').val() === auth.uid || !data.child('lastActivityAt').exists() || now > data.child('lastActivityAt').val() + 7200000)))",
         "status": {
-          ".write": "auth != null && ((data.val() === 'waiting' && newData.val() === 'active' && root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid) || (data.val() === 'active' && newData.val() === 'completed' && root.child('dashRaces/' + $code + '/winnerUid').val() === auth.uid))"
+          ".write": "auth != null && ((data.val() === 'waiting' && newData.val() === 'active' && root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid) || (data.val() === 'active' && newData.val() === 'completed' && (root.child('dashRaces/' + $code + '/winnerUid').val() === auth.uid || (root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid && root.child('dashRaces/' + $code + '/winnerUid').val().matches(/^bot[0-9]+$/)))))"
         },
         "startedAt": {
           ".write": "auth != null && !data.exists() && root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid"
@@ -19,7 +19,7 @@
           ".validate": "newData.isNumber()"
         },
         "winnerUid": {
-          ".write": "auth != null && !data.exists() && newData.val() === auth.uid && root.child('dashRaces/' + $code + '/status').val() === 'active' && root.child('dashRaces/' + $code + '/players/' + auth.uid + '/finished').val() === true"
+          ".write": "auth != null && !data.exists() && root.child('dashRaces/' + $code + '/status').val() === 'active' && ((newData.val() === auth.uid && root.child('dashRaces/' + $code + '/players/' + auth.uid + '/finished').val() === true) || (newData.val().matches(/^bot[0-9]+$/) && root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid && root.child('dashRaces/' + $code + '/players/' + newData.val() + '/finished').val() === true))"
         },
         "settings": {
           "trackLength": {
@@ -27,11 +27,17 @@
           },
           "wrongStepBack": {
             ".validate": "newData.val() === 1 || newData.val() === 2"
+          },
+          "botCount": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 9"
+          },
+          "botSkill": {
+            ".validate": "newData.val() === 'easy' || newData.val() === 'medium' || newData.val() === 'hard'"
           }
         },
         "players": {
           "$uid": {
-            ".write": "auth != null && auth.uid === $uid && (!newData.exists() || data.exists() || (root.child('dashRaces/' + $code + '/status').val() === 'waiting'))",
+            ".write": "auth != null && (auth.uid === $uid || ($uid.matches(/^bot[0-9]+$/) && root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid)) && (!newData.exists() || data.exists() || (root.child('dashRaces/' + $code + '/status').val() === 'waiting'))",
             "name": {
               ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
             },

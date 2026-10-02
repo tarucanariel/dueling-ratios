@@ -23,7 +23,7 @@
 
 import { ref, set, get, update, remove, onValue, off, onDisconnect, serverTimestamp, runTransaction } from "firebase/database";
 import { db, auth, ensureSignedIn } from "./firebase.js";
-import { DASH_MAX_PLAYERS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, isRaceOver } from "./dashLogic.js";
+import { DASH_MAX_PLAYERS, DASH_MAX_BOTS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, isRaceOver } from "./dashLogic.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I, same as online.js
 export const DASH_CODE_LENGTH = 4;
@@ -56,6 +56,37 @@ function buildPlayerEntry(uid, name){
   };
 }
 
+const BOT_NAMES = ["Ying", "Guillermo", "Merlie", "Romel", "Divino", "Chatt", "Zan", "Oding", "Rycanz"];
+
+/* A fresh random order of the bot names for each race, so a host adding
+   3 bots doesn't always get the same 3. */
+function shuffledBotNames(){
+  const names = [...BOT_NAMES];
+  for(let i = names.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [names[i], names[j]] = [names[j], names[i]];
+  }
+  return names;
+}
+
+/* A bot is a normal player entry the host's client plays (see
+   startDashBots in main.js). Its uid has the form "bot1", "bot2", ... —
+   the database rules let only the host write those entries. */
+function buildBotEntry(index, name){
+  return {
+    uid: "bot" + (index + 1),
+    name: "\u{1F916} " + name,
+    avatarSeed: "bot-" + name,
+    isBot: true,
+    joinedAt: Date.now() + index + 1,
+    position: 0,
+    correctCount: 0,
+    wrongCount: 0,
+    finished: false,
+    connected: true,
+  };
+}
+
 const raceRef = (code) => ref(db, "dashRaces/" + code);
 const playerRef = (code, uid) => ref(db, `dashRaces/${code}/players/${uid}`);
 
@@ -80,8 +111,11 @@ async function pruneStaleRaces(){
   } catch (err){ /* best-effort */ }
 }
 
-/* settings: { allowedOps, allowNegatives, trackLength, wrongStepBack } — the
-   last two default to 25 and 2. */
+/* settings: { allowedOps, allowNegatives, trackLength, wrongStepBack,
+   botCount, botSkill } — trackLength/wrongStepBack default to 25 and 2;
+   botCount (0-9, default 0) computer racers are added to the lobby up
+   front and take up racer slots, so only the remaining slots are open to
+   other people. botSkill is 'easy' | 'medium' | 'hard'. */
 export async function createRace(hostName, settings){
   const uid = await currentUid();
   pruneStaleRaces();
@@ -93,6 +127,14 @@ export async function createRace(hostName, settings){
     code = generateCode();
   }
 
+  const botCount = Math.min(DASH_MAX_BOTS, Math.max(0, Math.floor(settings.botCount) || 0));
+  const players = { [uid]: buildPlayerEntry(uid, hostName) };
+  const botNames = shuffledBotNames();
+  for(let i = 0; i < botCount; i++){
+    const bot = buildBotEntry(i, botNames[i]);
+    players[bot.uid] = bot;
+  }
+
   await set(raceRef(code), {
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
@@ -100,8 +142,8 @@ export async function createRace(hostName, settings){
     status: "waiting",
     startedAt: null,
     winnerUid: null,
-    settings: { trackLength: DASH_TRACK_LENGTH, wrongStepBack: DASH_WRONG_STEP_BACK, ...settings },
-    players: { [uid]: buildPlayerEntry(uid, hostName) },
+    settings: { trackLength: DASH_TRACK_LENGTH, wrongStepBack: DASH_WRONG_STEP_BACK, botSkill: "medium", ...settings, botCount },
+    players,
   });
   return { code, uid };
 }

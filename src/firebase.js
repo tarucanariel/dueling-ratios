@@ -206,12 +206,20 @@ import { STATS_MODES, OPERATIONS } from './constants.js';
 // if a symbol choice changes again upstream in logic.js.
 const OP_PATH_KEYS = { '+': 'add', '-': 'subtract', '×': 'multiply', '÷': 'divide' };
 
-export async function recordGameResult(uid, modeKey, correctCount, wrongCount, opTally){
+/* `extras` (optional) is a { field: amount } map of additional per-mode
+   counters to bump alongside the standard three — Ratio Dash uses it for
+   its race wins and podium finishes. Zero amounts are skipped. */
+export async function recordGameResult(uid, modeKey, correctCount, wrongCount, opTally, extras){
   const updates = {
     [`playerStats/${uid}/${modeKey}/gamesPlayed`]: increment(1),
     [`playerStats/${uid}/${modeKey}/correctCount`]: increment(correctCount),
     [`playerStats/${uid}/${modeKey}/wrongCount`]: increment(wrongCount),
   };
+  if(extras){
+    Object.entries(extras).forEach(([field, amount]) => {
+      if(amount) updates[`playerStats/${uid}/${modeKey}/${field}`] = increment(amount);
+    });
+  }
   // opTally: { '+': {correct, wrong}, '-': {...}, ... } — only the
   // operations actually played this game need an entry; see
   // state.opTally in main.js for how it's built during play.
@@ -239,6 +247,9 @@ export async function getPlayerStats(uid){
       wrongCount: d.wrongCount || 0,
     };
   });
+  // Ratio Dash's race-only counters (see recordGameResult's `extras`).
+  stats.dash.wins = (data.dash && data.dash.wins) || 0;
+  stats.dash.podiums = (data.dash && data.dash.podiums) || 0;
   // Per-operation lifetime totals, for the operation-mastery badges —
   // same read, just a different sub-node of playerStats/{uid}. Always
   // returns an entry for every op (defaulting to zero), same defensive

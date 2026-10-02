@@ -122,6 +122,32 @@
       </select>
     </div>
 
+    <div class="setup-step hidden" id="step-dash-bots">
+      <label for="dash-bots-select">Computer racers (bots)</label>
+      <select id="dash-bots-select">
+        <option value="0" selected>None</option>
+        <option value="1">1 bot</option>
+        <option value="2">2 bots</option>
+        <option value="3">3 bots</option>
+        <option value="4">4 bots</option>
+        <option value="5">5 bots</option>
+        <option value="6">6 bots</option>
+        <option value="7">7 bots</option>
+        <option value="8">8 bots</option>
+        <option value="9">9 bots</option>
+      </select>
+      <p class="field-note" id="dash-bots-note">Bots take up racer slots, leaving fewer for other players.</p>
+    </div>
+
+    <div class="setup-step hidden" id="step-dash-botskill">
+      <label for="dash-botskill-select">Bot skill</label>
+      <select id="dash-botskill-select">
+        <option value="easy">Easy &mdash; slower, makes more mistakes</option>
+        <option value="medium" selected>Medium</option>
+        <option value="hard">Hard &mdash; fast and accurate</option>
+      </select>
+    </div>
+
     <div class="setup-step hidden" id="step-join-code">
       <label for="join-code-input">Room code</label>
       <input type="text" id="join-code-input" maxlength="4" placeholder="e.g. 7XQ2" autocomplete="off" class="code-input">
@@ -212,7 +238,7 @@
         <li><strong>Same Device</strong> — two players take turns on one screen.</li>
         <li><strong>vs Computer</strong> — take turns against a computer opponent on one screen. Choose Easy, Medium, or Hard — higher difficulties answer faster and make fewer mistakes.</li>
         <li><strong>Online</strong> — challenge someone on a different device using a shareable room code.</li>
-        <li><strong>&#127937; Ratio Dash</strong> — a race for 2 to 10 players. The host picks the operations and shares a 4-character code; everyone solves their own stream of fraction problems at the same time. After a 3-2-1 countdown, every correct number moves your avatar 1 step toward the finish line, but a wrong number sends it back — 2 steps by default — so one mistake takes two correct answers to recover. The host can also set the race length (15, 25 or 40 steps) and the setback (1 or 2 steps). The first avatar to reach the finish line wins, and a badge beside the track shows your current place. If your tab closes mid-race, reopen the game within 10 minutes and tap Rejoin to get back on the track.</li>
+        <li><strong>&#127937; Ratio Dash</strong> — a race for 2 to 10 players. The host picks the operations and shares a 4-character code; everyone solves their own stream of fraction problems at the same time. After a 3-2-1 countdown, every correct number moves your avatar 1 step toward the finish line, but a wrong number sends it back — 2 steps by default — so one mistake takes two correct answers to recover. The host can also set the race length (15, 25 or 40 steps) and the setback (1 or 2 steps), and add computer racers (bots) that take up racer slots. Wins and podiums only count toward badges when at least two real people raced. The first avatar to reach the finish line wins, and a badge beside the track shows your current place. If your tab closes mid-race, reopen the game within 10 minutes and tap Rejoin to get back on the track.</li>
       </ul>
 
       <h3>How to Solve a Problem</h3>
@@ -417,8 +443,14 @@
             <td id="my-stats-online-games">0</td>
             <td id="my-stats-online-accuracy">N/A</td>
           </tr>
+          <tr>
+            <td>&#127937; Ratio Dash</td>
+            <td id="my-stats-dash-games">0</td>
+            <td id="my-stats-dash-accuracy">N/A</td>
+          </tr>
         </tbody>
       </table>
+      <p class="field-note hidden" id="my-stats-dash-line"></p>
 
     </div>
 

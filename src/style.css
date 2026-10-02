@@ -3241,3 +3241,11 @@ button:focus-visible, input:focus-visible{
   background:rgba(255,51,102,0.18);
   border-color:var(--bad);
 }
+
+/* A badge earned at the finish of a race pops up over the results overlay
+   (which would otherwise cover it — both share the same stacking level). */
+.game-wrap.dash-mode .badge-popup,
+.game-wrap.dash-mode .streak-popup{
+  position:fixed;
+  z-index:200;
+}

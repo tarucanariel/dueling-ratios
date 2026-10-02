@@ -8,7 +8,7 @@
    get two plain string arrays.
    ========================================================= */
 
-export const STATS_MODES = ['solo', 'sameDevice', 'vsComputer', 'online'];
+export const STATS_MODES = ['solo', 'sameDevice', 'vsComputer', 'online', 'dash'];
 
 // Fraction operations tracked lifetime (across all modes, same as the
 // existing accuracy/lifetime badges) for the operation-mastery badges —

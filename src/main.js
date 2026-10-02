@@ -4,14 +4,14 @@ import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate,
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
 import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
-import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
+import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkDashBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './sounds.js';
 import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
 import { isResultTie } from './results.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, rejoinRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
-import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
+import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, humanCount, isCompetitiveRace, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
 import { avatarUrlForPlayer } from './dashAvatar.js';
 import { playDashCorrect, playDashWrong, playDashCountdownTick, startDashMusic, stopDashMusic } from './dashAudio.js';
 
@@ -111,6 +111,11 @@ const el = {
   dashJoinBtn: document.getElementById('dash-join-btn'),
   stepDashLength: document.getElementById('step-dash-length'),
   stepDashPenalty: document.getElementById('step-dash-penalty'),
+  stepDashBots: document.getElementById('step-dash-bots'),
+  dashBotsSelect: document.getElementById('dash-bots-select'),
+  dashBotsNote: document.getElementById('dash-bots-note'),
+  stepDashBotSkill: document.getElementById('step-dash-botskill'),
+  dashBotSkillSelect: document.getElementById('dash-botskill-select'),
   dashLengthSelect: document.getElementById('dash-length-select'),
   dashPenaltySelect: document.getElementById('dash-penalty-select'),
   dashRank: document.getElementById('dash-rank'),
@@ -269,6 +274,9 @@ const el = {
   myStatsVsComputerAccuracy: document.getElementById('my-stats-vscomputer-accuracy'),
   myStatsOnlineGames: document.getElementById('my-stats-online-games'),
   myStatsOnlineAccuracy: document.getElementById('my-stats-online-accuracy'),
+  myStatsDashGames: document.getElementById('my-stats-dash-games'),
+  myStatsDashAccuracy: document.getElementById('my-stats-dash-accuracy'),
+  myStatsDashLine: document.getElementById('my-stats-dash-line'),
   myClassesBtn: document.getElementById('my-classes-btn'),
   myClassesModal: document.getElementById('my-classes-modal'),
   myClassesSignedOut: document.getElementById('my-classes-signed-out'),
@@ -620,6 +628,7 @@ async function openMyStats(){
     el.myStatsSameDeviceGames, el.myStatsSameDeviceAccuracy,
     el.myStatsVsComputerGames, el.myStatsVsComputerAccuracy,
     el.myStatsOnlineGames, el.myStatsOnlineAccuracy,
+    el.myStatsDashGames, el.myStatsDashAccuracy,
   ].forEach(cell => { cell.textContent = '\u2026'; });
 
   try{
@@ -634,6 +643,7 @@ async function openMyStats(){
     const sameDevice = formatStatsRow(stats.sameDevice.gamesPlayed, stats.sameDevice.correctCount, stats.sameDevice.wrongCount);
     const vsComputer = formatStatsRow(stats.vsComputer.gamesPlayed, stats.vsComputer.correctCount, stats.vsComputer.wrongCount);
     const online = formatStatsRow(stats.online.gamesPlayed, stats.online.correctCount, stats.online.wrongCount);
+    const dash = formatStatsRow(stats.dash.gamesPlayed, stats.dash.correctCount, stats.dash.wrongCount);
     const total = sumAllModes(stats);
 
     el.myStatsTotalGames.textContent = total.games;
@@ -646,6 +656,10 @@ async function openMyStats(){
     el.myStatsVsComputerAccuracy.textContent = vsComputer.accuracy;
     el.myStatsOnlineGames.textContent = online.games;
     el.myStatsOnlineAccuracy.textContent = online.accuracy;
+    el.myStatsDashGames.textContent = dash.games;
+    el.myStatsDashAccuracy.textContent = dash.accuracy;
+    el.myStatsDashLine.classList.toggle('hidden', stats.dash.gamesPlayed === 0);
+    el.myStatsDashLine.textContent = `Ratio Dash: ${stats.dash.wins} win${stats.dash.wins === 1 ? '' : 's'} \u00B7 ${stats.dash.podiums} podium${stats.dash.podiums === 1 ? '' : 's'}`;
   } catch(err){
     el.myStatsError.textContent = 'Could not load your stats. Please try again.';
     console.error(err);
@@ -1963,6 +1977,15 @@ function updateStepVisibility(){
   el.stepNegatives.classList.toggle('hidden', !(showHostSettings || showDashSettings));
   el.stepDashLength.classList.toggle('hidden', !showDashSettings);
   el.stepDashPenalty.classList.toggle('hidden', !showDashSettings);
+  el.stepDashBots.classList.toggle('hidden', !showDashSettings);
+  const botCount = parseInt(el.dashBotsSelect.value, 10) || 0;
+  el.stepDashBotSkill.classList.toggle('hidden', !(showDashSettings && botCount > 0));
+  const humanSlots = DASH_MAX_PLAYERS - 1 - botCount; // besides the host
+  el.dashBotsNote.textContent = botCount === 0
+    ? 'Bots take up racer slots, leaving fewer for other players.'
+    : humanSlots === 0
+      ? 'Full house of bots \u2014 no other players can join.'
+      : `Up to ${humanSlots} other player${humanSlots === 1 ? '' : 's'} can join you.`;
   el.stepPairCount.classList.toggle('hidden', !showHostSettings);
   el.stepTimeControl.classList.toggle('hidden', !showHostSettings);
 
@@ -5253,6 +5276,7 @@ function selectDashChoice(choice){
   updateStepVisibility();
 }
 el.dashHostBtn.addEventListener('click', () => selectDashChoice('host'));
+el.dashBotsSelect.addEventListener('change', updateStepVisibility);
 el.dashJoinBtn.addEventListener('click', () => selectDashChoice('join'));
 
 async function handleDashHost(){
@@ -5275,6 +5299,8 @@ async function handleDashHost(){
       allowNegatives: el.allowNegatives.checked,
       trackLength: parseInt(el.dashLengthSelect.value, 10),
       wrongStepBack: parseInt(el.dashPenaltySelect.value, 10),
+      botCount: parseInt(el.dashBotsSelect.value, 10) || 0,
+      botSkill: el.dashBotSkillSelect.value,
     });
     enterDash(code, uid, true);
   } catch (err){
@@ -5338,11 +5364,11 @@ function enterDash(code, uid, isHost, { rejoin = false } = {}){
     countdownTimer: null,
     lastCount: null,
     lastRank: null,
+    wasLast: false,      // was alone in last place at some point (Comeback Kid badge)
+    statsRecorded: false,
     seatSavedAt: 0,
-    bots: isHost && DASH_DEV_BOTS ? createDashBots() : null, // dev-only, see DASH_DEV_BOTS
-    botTimer: null,
-    botWinnerUid: null,
-    raw: null,
+    botTimer: null,      // host only: drives the computer racers
+    botNext: {},         // bot uid -> time of its next move
   };
 
   el.setupModal.classList.add('hidden');
@@ -5409,6 +5435,7 @@ function cleanupDash(){
 function leaveDash(){
   const d = state.dash;
   if(d){
+    recordDashStats(d.race); // a race left midway still counts the answers given
     leaveRace(d.code, d.uid, {
       isHost: d.isHost,
       status: d.race ? d.race.status : 'waiting',
@@ -5436,6 +5463,55 @@ el.dashStartBtn.addEventListener('click', async () => {
   }
 });
 
+/* Records this race against the signed-in player's lifetime stats and
+   checks for new badges (see recordMyStats for the other modes' version).
+   Runs once per race: when the race ends, or when the player leaves it
+   midway (their answers still count, but it can't be a win or a podium
+   because the race hadn't ended). Everything it needs is read
+   synchronously up front, since resetToSetup() clears the live state
+   right after a leave. Best-effort, like every other stats write. */
+async function recordDashStats(race){
+  const d = state.dash;
+  if(!d || d.statsRecorded || !d.started) return;
+  d.statsRecorded = true;
+  if(!state.googleUser || state.googleUser.uid !== d.uid) return;
+
+  const correct = d.correctCount;
+  const wrong = d.wrongCount;
+  if(correct + wrong === 0) return;
+  const me = race && race.players ? race.players[d.uid] : null;
+  const finished = d.finishing || !!(me && me.finished);
+  const won = !!race && race.winnerUid === d.uid;
+  // Top 3 of a race that actually ended, with at least 4 racers (with
+  // fewer, nearly everyone is on the podium).
+  // Races where only one real person raced (the rest bots) still count
+  // toward games/accuracy, but not wins, podiums or the race badges.
+  const competitive = !!race && isCompetitiveRace(race.players);
+  let podium = false;
+  if(competitive && isRaceOver(race) && Object.keys(race.players).length >= 4){
+    podium = sortStandings(race.players, race.winnerUid).slice(0, 3).some(p => p.uid === d.uid);
+  }
+  const wasLast = d.wasLast;
+  const opTally = state.opTally;
+  const uid = d.uid;
+
+  try{
+    await recordGameResult(uid, 'dash', correct, wrong, opTally, { wins: competitive && won ? 1 : 0, podiums: podium ? 1 : 0 });
+    const freshStats = await getPlayerStats(uid);
+    state.myBadges = new Set(Object.keys(freshStats.badges || {}));
+    state.myStats = freshStats;
+    // "Perfect Game" only for a race actually finished without a miss —
+    // not for one that someone else ended after a few lucky answers.
+    const newlyEarned = [
+      ...checkGameEndBadges(freshStats, state.myBadges, finished ? correct : 0, wrong, false, { mode: 'dash' }),
+      ...(competitive ? checkDashBadges(freshStats, state.myBadges, { won, podium, wasLast, wrongCount: wrong, correctCount: correct }) : []),
+    ];
+    await awardAndCelebrateBadges(newlyEarned);
+  } catch(err){
+    console.error('Failed to record Ratio Dash stats:', err);
+  }
+}
+
 function handleDashWaitTimeout(){
   const d = state.dash;
   if(!d) return;
@@ -5445,57 +5521,56 @@ function handleDashWaitTimeout(){
   el.setupError.textContent = 'No one started the race within 10 minutes, so it was cancelled.';
 }
 
-/* Dev-only test aid: open the app with ?dashbots=N (N = 1-9) on the dev
-   server and the HOST's client adds N fake racers to what it displays, so
-   the 10-player layout can be checked alone. The bots exist only in that
-   one browser — nothing about them is written to the database — and they
-   are compiled out of production builds. */
-const DASH_DEV_BOTS = import.meta.env.DEV
-  ? Math.min(DASH_MAX_PLAYERS - 1, Math.max(0, parseInt(new URLSearchParams(window.location.search).get('dashbots'), 10) || 0))
-  : 0;
-
-function createDashBots(){
-  const bots = {};
-  for(let i = 1; i <= DASH_DEV_BOTS; i++){
-    bots[`bot${i}`] = {
-      uid: `bot${i}`, name: `Bot ${i}`, avatarSeed: `bot${i}`,
-      joinedAt: Date.now() + i, position: 0, correctCount: 0, wrongCount: 0,
-      finished: false, connected: true, nextMoveAt: 0,
-    };
-  }
-  return bots;
-}
-
-function mergeDashBots(race){
-  const d = state.dash;
-  return { ...race, players: { ...race.players, ...d.bots }, winnerUid: race.winnerUid || d.botWinnerUid || null };
-}
+/* ---------- Bots (computer racers) ----------
+   Bots are ordinary player entries in the race (see buildBotEntry in
+   dashRace.js), played by the HOST's client: every ~0.4s it checks which
+   bots are due a move and writes their new position, so everyone sees
+   them race through the same snapshot as real players. They answer like
+   the vs-Computer opponent does — same skill table, with a little
+   per-bot variation in pace. If the host closes their tab mid-race the
+   bots stop where they are; they carry on if the host rejoins. */
 
 function startDashBots(){
   const d = state.dash;
-  d.botTimer = setInterval(() => {
-    if(!state.dash || d.ending) return;
-    const now = Date.now();
-    Object.values(d.bots).forEach((bot) => {
-      if(bot.finished || now < bot.nextMoveAt) return;
-      const correct = Math.random() < 0.8;
-      bot.position = nextPosition(bot.position, correct, d.trackLength, d.wrongStepBack);
-      if(correct) bot.correctCount++; else bot.wrongCount++;
-      bot.nextMoveAt = now + 900 + Math.random() * 2600;
-      if(bot.position >= d.trackLength){
-        bot.finished = true;
-        if(!d.botWinnerUid) d.botWinnerUid = bot.uid;
-      }
-    });
-    if(d.raw) onDashUpdate(d.raw);
-  }, 400);
+  if(!d.isHost || !d.race) return;
+  if(!Object.values(d.race.players).some(p => p.isBot)) return;
+  if(d.botTimer) clearInterval(d.botTimer);
+  d.botNext = {};
+  d.botTimer = setInterval(tickDashBots, 400);
 }
 
-function onDashUpdate(rawRace){
+function tickDashBots(){
+  const d = state.dash;
+  if(!d || d.ending || !d.began || !d.race) return;
+  const skill = COMPUTER_DIFFICULTY[d.race.settings.botSkill] || COMPUTER_DIFFICULTY.medium;
+  const now = Date.now();
+
+  Object.values(d.race.players).filter(p => p.isBot && !p.finished).forEach((bot) => {
+    // Small fixed per-bot pace difference (about 0.85x-1.25x) so a field
+    // of bots doesn't move in lockstep.
+    const pace = 0.85 + (Number(bot.uid.replace('bot', '')) % 5) * 0.1;
+    const nextDelay = () => (skill.minDelayMs + Math.random() * (skill.maxDelayMs - skill.minDelayMs)) * pace;
+
+    if(d.botNext[bot.uid] === undefined) d.botNext[bot.uid] = now + nextDelay();
+    if(now < d.botNext[bot.uid]) return;
+    d.botNext[bot.uid] = now + nextDelay();
+
+    const correct = Math.random() >= skill.errorChance;
+    const progress = {
+      position: nextPosition(bot.position || 0, correct, d.trackLength, d.wrongStepBack),
+      correctCount: (bot.correctCount || 0) + (correct ? 1 : 0),
+      wrongCount: (bot.wrongCount || 0) + (correct ? 0 : 1),
+    };
+    const write = progress.position >= d.trackLength
+      ? finishRace(d.code, bot.uid, progress)
+      : reportProgress(d.code, bot.uid, progress);
+    write.catch((err) => console.error('Failed to move Ratio Dash bot:', err));
+  });
+}
+
+function onDashUpdate(race){
   const d = state.dash;
   if(!d) return;
-  d.raw = rawRace;
-  const race = rawRace && d.bots ? mergeDashBots(rawRace) : rawRace;
 
   if(!race){
     // Deleted: the host left the lobby, or the finished race was cleared.
@@ -5567,9 +5642,11 @@ function renderDashLobby(race){
 
   const steps = (race.settings && race.settings.trackLength) || DASH_TRACK_LENGTH;
   const back = (race.settings && race.settings.wrongStepBack) || DASH_WRONG_STEP_BACK;
-  el.dashLobbyRules.textContent = `${steps} steps to the finish \u00B7 a wrong answer sends you back ${back} step${back === 1 ? '' : 's'}`;
+  el.dashLobbyRules.textContent = `${steps} steps to the finish \u00B7 a wrong answer sends you back ${back} step${back === 1 ? '' : 's'}`
+    + (race.settings && race.settings.botCount > 0 ? ` \u00B7 bots: ${race.settings.botSkill || 'medium'}` : '');
 
-  const joined = `${players.length}/${DASH_MAX_PLAYERS} players joined`;
+  const botCount = players.length - humanCount(race.players);
+  const joined = `${players.length}/${DASH_MAX_PLAYERS} racers${botCount > 0 ? ` (${botCount} bot${botCount === 1 ? '' : 's'})` : ''} joined`;
   const enough = players.length >= DASH_MIN_PLAYERS;
   el.dashBanner.innerHTML = '<span class="dash-pulse-dot"></span><span></span>';
   const bannerText = el.dashBanner.lastElementChild;
@@ -5677,7 +5754,7 @@ function beginDashRace(fromCountdown){
   announceGameStart(activeTileEffectId());
   startDashMusic();
   startNextPair();
-  if(d.bots) startDashBots();
+  startDashBots();
 }
 
 function showDashCountdownNumber(count){
@@ -5708,6 +5785,7 @@ function updateDashRank(race){
     void el.dashRank.offsetWidth;
     el.dashRank.classList.add('rank-up');
   }
+  if(info.of >= 3 && info.rank === info.of) d.wasLast = true;
   d.lastRank = info.rank;
 }
 
@@ -5802,7 +5880,7 @@ function syncDashTrack(race, { silent = false } = {}){
       avatarEl._moveTimer = setTimeout(() => avatarEl.classList.remove(moveClass), 1500);
 
       if(!silent && player.uid !== d.uid){
-        (gotCorrect ? playDashCorrect : playDashWrong)(0.45);
+        (gotCorrect ? playDashCorrect : playDashWrong)(player.isBot ? 0.15 : 0.45);
       }
     }
 
@@ -5852,9 +5930,16 @@ function handleDashTileClick(tileId){
       playSound(tier.sound);
       showStreakPopup(streakPopupText(player.name, player.streak, false), tier.cssClass);
     }
+    // Stats and badges only ever apply to a signed-in Google account.
+    if(state.googleUser){
+      const badgeId = checkStreakBadge(player.streak, state.myBadges);
+      if(badgeId) awardAndCelebrateBadges([badgeId]);
+      trackOpTally(state.problem.op, true);
+    }
   } else {
     d.wrongCount += 1;
     player.streak = 0;
+    if(state.googleUser) trackOpTally(state.problem.op, false);
     playSound('wrong');
     animateTileThrow(tileEl, slotEls[0], 'wrong');
     // As in the other modes, wrong tiles stay in the pool: the same value
@@ -5904,6 +5989,7 @@ function handleDashRaceEnd(race){
   state.inputLocked = true;
   stopDashMusic();
   clearSeat(); // nothing left to rejoin
+  recordDashStats(race);
   if(d.countdownTimer){
     clearTimeout(d.countdownTimer);
     d.countdownTimer = null;
@@ -5925,7 +6011,8 @@ function showDashResults(){
   const d = state.dash;
   if(!d || !d.race) return;
   d.resultsShown = true;
-  el.gameScreen.classList.add('hidden');
+  // The game screen stays underneath (dimmed by the results overlay) so a
+  // badge earned at the finish can still pop up over the results.
   el.setupModal.classList.add('hidden');
   el.dashLobbyModal.classList.add('hidden');
   renderDashResults(d.race);

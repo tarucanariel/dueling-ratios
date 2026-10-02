@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkGameEndBadges, checkStreakBadge, getNextBadgeProgress, BADGE_DEFS, BADGE_DEFS_BY_ID } from './badges.js';
+import { checkGameEndBadges, checkDashBadges, checkStreakBadge, getNextBadgeProgress, BADGE_DEFS, BADGE_DEFS_BY_ID } from './badges.js';
 
 // A blank stats object matching what getPlayerStats() in firebase.js
 // returns — every mode present, all zeros, plus an empty opStats. Tests
@@ -269,5 +269,48 @@ describe('getNextBadgeProgress', () => {
     stats.solo.correctCount = 999999;
     const progress = getNextBadgeProgress(stats, new Set());
     progress.forEach((p) => expect(p.percent).toBeLessThanOrEqual(100));
+  });
+});
+
+describe('checkDashBadges', () => {
+  const stats = (wins) => ({ dash: { wins } });
+
+  it('awards Podium Finish for a top-3 result, once', () => {
+    expect(checkDashBadges(stats(0), new Set(), { podium: true })).toEqual(['dash-podium']);
+    expect(checkDashBadges(stats(0), new Set(['dash-podium']), { podium: true })).toEqual([]);
+    expect(checkDashBadges(stats(0), new Set(), { podium: false })).toEqual([]);
+  });
+
+  it('awards Clean Sprint only for a win with no mistakes', () => {
+    const earned = new Set(['dash-first-win']);
+    expect(checkDashBadges(stats(1), earned, { won: true, correctCount: 25, wrongCount: 0 })).toEqual(['dash-clean-sprint']);
+    expect(checkDashBadges(stats(1), earned, { won: true, correctCount: 27, wrongCount: 1 })).toEqual([]);
+    expect(checkDashBadges(stats(0), new Set(), { won: false, correctCount: 10, wrongCount: 0 })).toEqual([]);
+    expect(checkDashBadges(stats(1), new Set(['dash-first-win', 'dash-clean-sprint']), { won: true, correctCount: 25, wrongCount: 0 })).toEqual([]);
+  });
+
+  it('awards Race Winner at 1 win and Dash Champion at 5 wins', () => {
+    expect(checkDashBadges(stats(1), new Set(), {})).toEqual(['dash-first-win']);
+    expect(checkDashBadges(stats(5), new Set(['dash-first-win']), {})).toEqual(['dash-wins-5']);
+    expect(checkDashBadges(stats(4), new Set(['dash-first-win']), {})).toEqual([]);
+  });
+
+  it('awards Comeback Kid only for a win after having been in last place', () => {
+    expect(checkDashBadges(stats(1), new Set(['dash-first-win']), { won: true, wasLast: true })).toEqual(['dash-comeback']);
+    expect(checkDashBadges(stats(1), new Set(['dash-first-win']), { won: true, wasLast: false })).toEqual([]);
+    expect(checkDashBadges(stats(0), new Set(), { won: false, wasLast: true })).toEqual([]);
+  });
+
+  it('copes with stats that have no dash entry', () => {
+    expect(checkDashBadges({}, new Set(), {})).toEqual([]);
+  });
+});
+
+describe('Ratio Dash progress bar', () => {
+  it('shows progress toward the next win badge', () => {
+    const stats = { solo: {}, sameDevice: {}, vsComputer: {}, online: {}, dash: { wins: 2, gamesPlayed: 3 } };
+    const entry = getNextBadgeProgress(stats, new Set(['dash-first-win'])).find((e) => e.id === 'dash-wins-5');
+    expect(entry.percent).toBe(40);
+    expect(entry.caption).toBe('2 / 5 Ratio Dash wins');
   });
 });

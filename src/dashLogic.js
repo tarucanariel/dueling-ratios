@@ -12,6 +12,22 @@ export const DASH_WRONG_STEP_BACK = 2; // default setback for a wrong tile
 export const DASH_PENALTY_OPTIONS = [1, 2]; // setbacks the host can choose from
 export const DASH_COUNTDOWN_MS = 3000; // 3-2-1 before the race begins
 
+/* Bots are computer racers the host adds to a race. They are stored as
+   ordinary player entries (uid "bot1", "bot2", ...) flagged isBot, and the
+   host's client plays them. */
+export const DASH_MAX_BOTS = DASH_MAX_PLAYERS - 1; // the host always takes one slot
+
+export function humanCount(playersObj){
+  return Object.values(playersObj || {}).filter(p => !p.isBot).length;
+}
+
+/* Wins, podiums and the race-result badges only count when at least two
+   real people raced — otherwise one human could farm them against easy
+   bots. Games played, accuracy and streaks still count either way. */
+export function isCompetitiveRace(playersObj){
+  return humanCount(playersObj) >= 2;
+}
+
 /* A racer counts as "left" once their presence flag flips to false
    (see trackDashPresence in dashRace.js). Finished racers are never
    "left" — closing the tab after crossing the line is normal. */

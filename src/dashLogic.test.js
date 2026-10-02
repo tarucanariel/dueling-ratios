@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextPosition, sortStandings, hasPlayerLeft, isRaceOver, rankOf, ordinal, DASH_TRACK_LENGTH } from './dashLogic.js';
+import { nextPosition, sortStandings, hasPlayerLeft, isRaceOver, rankOf, ordinal, humanCount, isCompetitiveRace, DASH_TRACK_LENGTH, DASH_MAX_BOTS } from './dashLogic.js';
 
 describe('nextPosition', () => {
   it('moves one step forward on a correct answer', () => {
@@ -110,5 +110,29 @@ describe('rankOf', () => {
 describe('ordinal', () => {
   it('formats ordinals, including the teens', () => {
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd']);
+  });
+});
+
+describe('bots', () => {
+  const mixed = {
+    a: { uid: 'a' },
+    b: { uid: 'b' },
+    bot1: { uid: 'bot1', isBot: true },
+    bot2: { uid: 'bot2', isBot: true },
+  };
+
+  it('counts only real people as humans', () => {
+    expect(humanCount(mixed)).toBe(2);
+    expect(humanCount({ a: { uid: 'a' }, bot1: { uid: 'bot1', isBot: true } })).toBe(1);
+    expect(humanCount(null)).toBe(0);
+  });
+
+  it('is only a competitive race with at least two real people', () => {
+    expect(isCompetitiveRace(mixed)).toBe(true);
+    expect(isCompetitiveRace({ a: { uid: 'a' }, bot1: { uid: 'bot1', isBot: true } })).toBe(false);
+  });
+
+  it('leaves the host a slot', () => {
+    expect(DASH_MAX_BOTS).toBe(9);
   });
 });

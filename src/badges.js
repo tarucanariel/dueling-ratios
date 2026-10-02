@@ -54,6 +54,13 @@ export const BADGE_DEFS = [
   { id: 'multiplication-mastery', emoji: '✖️', name: 'Multiplication Master', description: `90%+ accuracy over at least ${OP_MASTERY_MIN_ANSWERED} multiplication answers, lifetime.` },
   { id: 'division-mastery',       emoji: '➗', name: 'Division Dynamo',      description: `90%+ accuracy over at least ${OP_MASTERY_MIN_ANSWERED} division answers, lifetime.` },
   { id: CAPSTONE_ID, emoji: '🧠', name: 'Fraction Champion', description: 'Earn all four operation-mastery badges.' },
+  // Ratio Dash — the one place badges look at race results, since a race
+  // is where a "win" actually means something.
+  { id: 'dash-podium',       emoji: '🥉', name: 'Podium Finish',  description: 'End a Ratio Dash race in the top 3 (races with 4 or more players).' },
+  { id: 'dash-first-win',    emoji: '🥇', name: 'Race Winner',    description: 'Win a Ratio Dash race.' },
+  { id: 'dash-wins-5',       emoji: '👑', name: 'Dash Champion',  description: 'Win 5 Ratio Dash races.' },
+  { id: 'dash-comeback',     emoji: '🔄', name: 'Comeback Kid',   description: 'Win a Ratio Dash race after being in last place.' },
+  { id: 'dash-clean-sprint', emoji: '💎', name: 'Clean Sprint',   description: 'Win a Ratio Dash race without a single mistake.' },
 ];
 
 export const BADGE_DEFS_BY_ID = Object.fromEntries(BADGE_DEFS.map((b) => [b.id, b]));
@@ -166,6 +173,25 @@ export function checkGameEndBadges(stats, earnedBadgeIds, gameCorrectCount, game
   return newlyEarned;
 }
 
+/* Ratio Dash badges. Call after a race's result has been recorded (so
+   `stats.dash.wins` already includes it), alongside checkGameEndBadges.
+   `raceMeta`: { won, podium, wasLast, wrongCount, correctCount } — whether
+   this player won the race, ended in the top 3 of a race with 4+ players,
+   was ever alone in last place during it, and their own miss/hit counts.
+   Returns the newly-earned badge ids. */
+export function checkDashBadges(stats, earnedBadgeIds, raceMeta = {}){
+  const newlyEarned = [];
+  const { won, podium, wasLast, wrongCount, correctCount } = raceMeta;
+  const wins = stats.dash?.wins || 0;
+
+  if(podium && !earnedBadgeIds.has('dash-podium')) newlyEarned.push('dash-podium');
+  if(wins >= 1 && !earnedBadgeIds.has('dash-first-win')) newlyEarned.push('dash-first-win');
+  if(wins >= 5 && !earnedBadgeIds.has('dash-wins-5')) newlyEarned.push('dash-wins-5');
+  if(won && wasLast && !earnedBadgeIds.has('dash-comeback')) newlyEarned.push('dash-comeback');
+  if(won && correctCount > 0 && wrongCount === 0 && !earnedBadgeIds.has('dash-clean-sprint')) newlyEarned.push('dash-clean-sprint');
+  return newlyEarned;
+}
+
 /* Call live, mid-game, right where streak milestones are already
    detected (see isStreakMilestone/streakTierFor in main.js) — passed
    the player's current streak count. Exact-equality checks are safe
@@ -207,6 +233,7 @@ const PROGRESS_FAMILIES = [
   ['subtraction-mastery'],
   ['multiplication-mastery'],
   ['division-mastery'],
+  ['dash-first-win', 'dash-wins-5'],
 ];
 
 const PROGRESS_TARGETS = {
@@ -216,6 +243,8 @@ const PROGRESS_TARGETS = {
   'sharpshooter':    { kind: 'accuracy', minAnswered: 50, minAccuracy: 0.9 },
   'accuracy-98':     { kind: 'accuracy', minAnswered: 200, minAccuracy: 0.98 },
   'lifetime-1000':   { kind: 'count', target: 1000 },
+  'dash-first-win':  { kind: 'count', target: 1, source: 'dashWins' },
+  'dash-wins-5':     { kind: 'count', target: 5, source: 'dashWins' },
   'addition-mastery':       { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '+' },
   'subtraction-mastery':    { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '-' },
   'multiplication-mastery': { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '×' },
@@ -248,9 +277,11 @@ export function getNextBadgeProgress(stats, earnedBadgeIds){
     let percent, caption;
 
     if(target.kind === 'count'){
-      const current = nextId === 'lifetime-1000' ? correct : totalGames;
+      const current = target.source === 'dashWins' ? (stats.dash?.wins || 0)
+        : nextId === 'lifetime-1000' ? correct : totalGames;
       percent = Math.min(100, Math.round((current / target.target) * 100));
-      const noun = nextId === 'lifetime-1000' ? 'correct answers' : 'games played';
+      const noun = target.source === 'dashWins' ? 'Ratio Dash wins'
+        : nextId === 'lifetime-1000' ? 'correct answers' : 'games played';
       caption = `${current} / ${target.target} ${noun}`;
     } else { // 'accuracy'
       // Plain accuracy badges (sharpshooter/accuracy-98) use the
