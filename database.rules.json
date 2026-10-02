@@ -4,6 +4,42 @@
       ".read": "auth != null",
       ".write": "auth != null"
     },
+    "dashRaces": {
+      ".read": "auth != null",
+      "$code": {
+        ".write": "auth != null && ((!data.exists() && newData.child('hostUid').val() === auth.uid && newData.child('status').val() === 'waiting') || (data.exists() && !newData.exists() && (data.child('hostUid').val() === auth.uid || !data.child('lastActivityAt').exists() || now > data.child('lastActivityAt').val() + 7200000)))",
+        "status": {
+          ".write": "auth != null && ((data.val() === 'waiting' && newData.val() === 'active' && root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid) || (data.val() === 'active' && newData.val() === 'completed' && root.child('dashRaces/' + $code + '/winnerUid').val() === auth.uid))"
+        },
+        "startedAt": {
+          ".write": "auth != null && !data.exists() && root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid"
+        },
+        "lastActivityAt": {
+          ".write": "auth != null && root.child('dashRaces/' + $code + '/players/' + auth.uid).exists()",
+          ".validate": "newData.isNumber()"
+        },
+        "winnerUid": {
+          ".write": "auth != null && !data.exists() && newData.val() === auth.uid && root.child('dashRaces/' + $code + '/status').val() === 'active' && root.child('dashRaces/' + $code + '/players/' + auth.uid + '/finished').val() === true"
+        },
+        "players": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && (!newData.exists() || data.exists() || (root.child('dashRaces/' + $code + '/status').val() === 'waiting'))",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+            },
+            "position": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 25"
+            },
+            "correctCount": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            },
+            "wrongCount": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            }
+          }
+        }
+      }
+    },
     "playerStats": {
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || data.child('classTeacherUid').val() === auth.uid)",

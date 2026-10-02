@@ -14,6 +14,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@dicebear/core": "^9.4.3",
+    "@dicebear/pixel-art": "^9.4.2",
     "firebase": "^12.17.0"
   },
   "devDependencies": {

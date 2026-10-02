@@ -10,13 +10,17 @@ import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './
 import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
 import { isResultTie } from './results.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
+import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
+import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, DASH_TRACK_LENGTH, nextPosition, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
+import { avatarUrlForPlayer } from './dashAvatar.js';
+import { playDashCorrect, playDashWrong, startDashMusic, stopDashMusic } from './dashAudio.js';
 
 /* =========================================================
    AAT's Dueling Ratios — app logic
    ========================================================= */
 
 const state = {
-  mode: null,           // 'solo' | 'vs' | 'online'
+  mode: null,           // 'solo' | 'vs' | 'computer' | 'online' | 'dash'
   players: [],          // [{name, score}] length 1 or 2
   currentPlayer: 0,      // index into players
   totalPairs: 0,
@@ -30,6 +34,10 @@ const state = {
   inputLocked: false,   // prevents a single tap from being processed twice
   timeControlSeconds: 0, // 0 = no timer (local modes only — not yet supported online)
   timerId: null,         // setInterval handle
+
+  // Ratio Dash (see the Ratio Dash section near the end of this file)
+  dashChoice: null,      // 'host' | 'join' (setup screen only)
+  dash: null,            // live race session, or null — see enterDash()
 
   // Online play
   onlineChoice: null,    // 'create' | 'join' | 'find'
@@ -97,6 +105,25 @@ const el = {
   modeVs: document.getElementById('mode-vs'),
   modeComputer: document.getElementById('mode-computer'),
   modeOnline: document.getElementById('mode-online'),
+  modeDash: document.getElementById('mode-dash'),
+  stepDashChoice: document.getElementById('step-dash-choice'),
+  dashHostBtn: document.getElementById('dash-host-btn'),
+  dashJoinBtn: document.getElementById('dash-join-btn'),
+  dashTrackWrap: document.getElementById('dash-track-wrap'),
+  dashTrack: document.getElementById('dash-track'),
+  dashProgress: document.getElementById('dash-progress'),
+  dashLeaveBtn: document.getElementById('dash-leave-btn'),
+  dashLobbyModal: document.getElementById('dash-lobby-modal'),
+  dashRoomCode: document.getElementById('dash-room-code'),
+  dashBanner: document.getElementById('dash-banner'),
+  dashLobbySlots: document.getElementById('dash-lobby-slots'),
+  dashLobbyStatus: document.getElementById('dash-lobby-status'),
+  dashStartBtn: document.getElementById('dash-start-btn'),
+  dashLobbyLeaveBtn: document.getElementById('dash-lobby-leave-btn'),
+  dashResultsModal: document.getElementById('dash-results-modal'),
+  dashResultsHeading: document.getElementById('dash-results-heading'),
+  dashStandings: document.getElementById('dash-standings'),
+  dashBackBtn: document.getElementById('dash-back-btn'),
   stepDifficulty: document.getElementById('step-difficulty'),
   difficultyChoices: document.querySelectorAll('.choice-btn[data-difficulty]'),
   startBtn: document.getElementById('start-game-btn'),
@@ -1319,6 +1346,7 @@ el.modeSolo.addEventListener('click', () => selectMode('solo'));
 el.modeVs.addEventListener('click', () => selectMode('vs'));
 el.modeComputer.addEventListener('click', () => selectMode('computer'));
 el.modeOnline.addEventListener('click', () => selectMode('online'));
+el.modeDash.addEventListener('click', () => selectMode('dash'));
 el.startBtn.addEventListener('click', handlePrimaryButtonClick);
 el.rematchBtn.addEventListener('click', handleRematchClick);
 el.newGameBtn.addEventListener('click', resetToSetup);
@@ -1865,12 +1893,16 @@ el.opChoices.forEach(cb => {
 function selectMode(mode){
   state.mode = mode;
   state.onlineChoice = null;
+  state.dashChoice = null;
+  el.dashHostBtn.classList.remove('selected');
+  el.dashJoinBtn.classList.remove('selected');
   closeLobby(); // leaving/changing mode — stop listening if we were browsing the lobby
   stopWatchingChallenge(); // ...and stop watching a pending challenge, if one was in flight
   el.modeSolo.classList.toggle('selected', mode === 'solo');
   el.modeVs.classList.toggle('selected', mode === 'vs');
   el.modeComputer.classList.toggle('selected', mode === 'computer');
   el.modeOnline.classList.toggle('selected', mode === 'online');
+  el.modeDash.classList.toggle('selected', mode === 'dash');
   el.onlineCreateBtn.classList.remove('selected');
   el.onlineJoinBtn.classList.remove('selected');
   el.onlineFindBtn.classList.remove('selected');
@@ -1901,30 +1933,36 @@ function selectOnlineChoice(choice){
 /* Central place that decides which setup fields are visible, based on
    the chosen mode (and, for online, whether creating or joining). */
 function updateStepVisibility(){
-  const { mode, onlineChoice } = state;
+  const { mode, onlineChoice, dashChoice } = state;
 
   el.stepName2.classList.toggle('hidden', mode !== 'vs');
   el.stepDifficulty.classList.toggle('hidden', mode !== 'computer');
   el.stepOnlineChoice.classList.toggle('hidden', mode !== 'online');
-  el.stepJoinCode.classList.toggle('hidden', !(mode === 'online' && onlineChoice === 'join'));
+  el.stepDashChoice.classList.toggle('hidden', mode !== 'dash');
+  el.stepJoinCode.classList.toggle('hidden', !((mode === 'online' && onlineChoice === 'join') || (mode === 'dash' && dashChoice === 'join')));
   el.stepFindOpponent.classList.toggle('hidden', !(mode === 'online' && onlineChoice === 'find'));
 
   // Operations/pair-count/negatives/time-control: local modes always show
   // them; online only shows them once "Create Game" is chosen (a guest —
   // whether joining by code or by challenging from the lobby — inherits
   // whatever the host picked, so they don't choose anything).
+  // Ratio Dash hosts pick operations/negatives only — a race has a fixed
+  // length (25 steps) and no timer or pair count.
   const showHostSettings = (mode === 'solo' || mode === 'vs' || mode === 'computer') || (mode === 'online' && onlineChoice === 'create');
-  el.stepOperations.classList.toggle('hidden', !showHostSettings);
-  el.stepNegatives.classList.toggle('hidden', !showHostSettings);
+  const showDashSettings = mode === 'dash' && dashChoice === 'host';
+  el.stepOperations.classList.toggle('hidden', !(showHostSettings || showDashSettings));
+  el.stepNegatives.classList.toggle('hidden', !(showHostSettings || showDashSettings));
   el.stepPairCount.classList.toggle('hidden', !showHostSettings);
   el.stepTimeControl.classList.toggle('hidden', !showHostSettings);
 
   // Start button: only appears once we know what it should do. "Find
   // Opponent" has no single submit action — each lobby row has its own
   // Challenge button — so the generic Start button stays hidden for it.
-  const ready = mode === 'solo' || mode === 'vs' || mode === 'computer' || (mode === 'online' && onlineChoice && onlineChoice !== 'find');
+  const ready = mode === 'solo' || mode === 'vs' || mode === 'computer' || (mode === 'online' && onlineChoice && onlineChoice !== 'find') || (mode === 'dash' && !!dashChoice);
   el.startBtn.classList.toggle('hidden', !ready);
-  if(mode === 'online'){
+  if(mode === 'dash'){
+    el.startBtn.textContent = dashChoice === 'join' ? 'Join Race' : 'Create Race';
+  } else if(mode === 'online'){
     el.startBtn.textContent = onlineChoice === 'join' ? 'Join Room' : 'Create Room';
   } else {
     el.startBtn.textContent = 'Start Game';
@@ -1932,6 +1970,11 @@ function updateStepVisibility(){
 }
 
 function handlePrimaryButtonClick(){
+  if(state.mode === 'dash'){
+    if(state.dashChoice === 'host') handleDashHost();
+    else if(state.dashChoice === 'join') handleDashJoin();
+    return;
+  }
   if(state.mode === 'online'){
     if(state.onlineChoice === 'create') handleCreateGame();
     else if(state.onlineChoice === 'join') handleJoinGame();
@@ -1998,6 +2041,7 @@ function tryStartGame(){
 }
 
 function resetToSetup(){
+  cleanupDash();
   stopTimer();
   stopUltraInstinctAmbientParticles();
   leaveOnlineRoom();
@@ -2031,9 +2075,13 @@ function resetToSetup(){
   el.modeSolo.classList.remove('selected');
   el.modeVs.classList.remove('selected');
   el.modeOnline.classList.remove('selected');
+  el.modeDash.classList.remove('selected');
   el.onlineCreateBtn.classList.remove('selected');
   el.onlineJoinBtn.classList.remove('selected');
   el.onlineFindBtn.classList.remove('selected');
+  state.dashChoice = null;
+  el.dashHostBtn.classList.remove('selected');
+  el.dashJoinBtn.classList.remove('selected');
   el.joinCodeInput.value = '';
   updateStepVisibility();
 }
@@ -3493,6 +3541,11 @@ function startNextPair(){
   el.feedbackLine.textContent = '';
   el.feedbackLine.className = 'feedback-line';
 
+  // Ratio Dash scrolls the board inside a fixed-height screen: start each
+  // new problem at the top so its given fractions are in view (renderProblem
+  // then only scrolls further if the first glowing slot is below the fold).
+  if(state.mode === 'dash') el.problemStrip.closest('.board-area').scrollTop = 0;
+
   renderProblem();
   renderPool();
   updateScoreChips();
@@ -3527,6 +3580,12 @@ function partHTML(part){
 function renderProblem(){
   applyTileEffectTheme();
   renderStackedLayout(state.layout);
+  // In a Ratio Dash race the board scrolls inside a fixed-height screen
+  // (see .game-wrap.dash-mode), so keep the glowing slot in view.
+  if(state.mode === 'dash'){
+    const activeSlot = el.problemStrip.querySelector('.cell-slot.active');
+    if(activeSlot) activeSlot.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
 }
 
 function renderStackedLayout(layout){
@@ -3598,6 +3657,7 @@ function renderPool(){
       if((state.isOnline && !myTurn) || isComputersTurn) btn.disabled = true;
       btn.addEventListener('click', () => {
         if(state.isOnline) handleOnlineTileClick(tile.id);
+        else if(state.mode === 'dash') handleDashTileClick(tile.id);
         else handleTileClick(tile.id);
       });
     }
@@ -5142,4 +5202,608 @@ function showWinner(){
     el.winnerHeading.textContent = heading;
     el.winnerDetail.textContent = detail;
   }
+}
+
+/* =========================================================
+   Ratio Dash — a race for up to 10 players (see dashRace.js for the
+   database layer and dashLogic.js for the rules).
+
+   Everyone solves their OWN stream of fraction problems, reusing the
+   normal board/tile pool (state.mode === 'dash'); the only thing shared
+   is each player's track position. A correct tile moves the avatar 1
+   step forward, a wrong tile 2 steps back, and the first avatar to reach
+   DASH_TRACK_LENGTH wins. Stats, badges and spectating are intentionally
+   not wired up for this mode.
+
+   All live race data hangs off state.dash (null outside a race), so the
+   module-level code here stays inert until the player picks the mode.
+   ========================================================= */
+
+const DASH_UNLOCK_DELAY_MS = 250;      // matches the normal correct-answer re-render delay
+const DASH_NEXT_PROBLEM_DELAY_MS = 700; // matches finishPair()'s pause
+const DASH_END_RESULTS_DELAY_MS = 2200; // lets the winner's final glide play before results cover the track
+const DASH_TRACK_VIEWPORT_SHARE = 0.3; // the track's budget, as a share of viewport height...
+const DASH_TRACK_MIN_PX = 120;         // ...clamped to this range
+const DASH_TRACK_MAX_PX = 280;
+const DASH_LANE_MIN_PX = 22;           // smallest lane (full room on a short screen)
+const DASH_LANE_MAX_PX = 44;           // roomiest lane (few players)
+
+function selectDashChoice(choice){
+  state.dashChoice = choice;
+  el.dashHostBtn.classList.toggle('selected', choice === 'host');
+  el.dashJoinBtn.classList.toggle('selected', choice === 'join');
+  el.setupError.textContent = '';
+  updateStepVisibility();
+}
+el.dashHostBtn.addEventListener('click', () => selectDashChoice('host'));
+el.dashJoinBtn.addEventListener('click', () => selectDashChoice('join'));
+
+async function handleDashHost(){
+  const name = getMyName();
+  if(!name){
+    el.setupError.textContent = 'Please enter your name, or sign in with Google.';
+    return;
+  }
+  const selectedOps = Array.from(el.opChoices).filter(cb => cb.checked).map(cb => cb.dataset.op);
+  if(selectedOps.length === 0){
+    el.setupError.textContent = 'Please select at least one operation to practice.';
+    return;
+  }
+
+  el.startBtn.disabled = true;
+  el.setupError.textContent = '';
+  try{
+    const { code, uid } = await createRace(name, { allowedOps: selectedOps, allowNegatives: el.allowNegatives.checked });
+    enterDash(code, uid, true);
+  } catch (err){
+    el.setupError.textContent = 'Could not create a race. Please try again.';
+    console.error(err);
+  } finally {
+    el.startBtn.disabled = false;
+  }
+}
+
+async function handleDashJoin(){
+  const name = getMyName();
+  const code = el.joinCodeInput.value.trim().toUpperCase();
+  if(!name){
+    el.setupError.textContent = 'Please enter your name, or sign in with Google.';
+    return;
+  }
+  if(code.length !== DASH_CODE_LENGTH){
+    el.setupError.textContent = `Please enter the ${DASH_CODE_LENGTH}-character race code.`;
+    return;
+  }
+
+  el.startBtn.disabled = true;
+  el.setupError.textContent = '';
+  try{
+    const result = await joinRace(code, name);
+    if(!result.ok){
+      el.setupError.textContent = result.message;
+      return;
+    }
+    enterDash(result.code, result.uid, false);
+  } catch (err){
+    el.setupError.textContent = 'Could not join that race. Please try again.';
+    console.error(err);
+  } finally {
+    el.startBtn.disabled = false;
+  }
+}
+
+function enterDash(code, uid, isHost){
+  cleanupDash();
+  state.mode = 'dash';
+  const d = state.dash = {
+    code, uid, isHost,
+    race: null,          // latest snapshot
+    started: false,      // race UI built for this session
+    ending: false,       // end-of-race sequence kicked off
+    resultsShown: false,
+    position: 0,         // this player's own track position (authoritative locally)
+    correctCount: 0,
+    wrongCount: 0,
+    finishing: false,    // crossed the line — input stays locked
+    avatarEls: new Map(),
+    waitTimer: null,
+    resultsTimer: null,
+    unsub: null,
+    presence: trackDashPresence(code, uid, isHost),
+    bots: isHost && DASH_DEV_BOTS ? createDashBots() : null, // dev-only, see DASH_DEV_BOTS
+    botTimer: null,
+    botWinnerUid: null,
+    raw: null,
+  };
+
+  el.setupModal.classList.add('hidden');
+  el.dashRoomCode.textContent = code;
+  el.dashLobbyModal.classList.remove('hidden');
+  d.unsub = listenToRace(code, onDashUpdate);
+}
+
+function clearDashWaitTimer(){
+  const d = state.dash;
+  if(d && d.waitTimer){
+    clearTimeout(d.waitTimer);
+    d.waitTimer = null;
+  }
+}
+
+/* Tears down everything Ratio Dash owns. Safe to call when no race is
+   active — resetToSetup() calls it on every return to the menu. */
+function cleanupDash(){
+  const d = state.dash;
+  stopDashMusic();
+  el.gameScreen.classList.remove('dash-mode');
+  el.dashTrackWrap.classList.add('hidden');
+  el.dashLobbyModal.classList.add('hidden');
+  el.dashResultsModal.classList.add('hidden');
+  if(!d) return;
+  clearDashWaitTimer();
+  if(d.resultsTimer) clearTimeout(d.resultsTimer);
+  if(d.botTimer) clearInterval(d.botTimer);
+  if(d.unsub) d.unsub();
+  d.presence.stop();
+  state.dash = null;
+}
+
+/* The one exit path for Leave / Back to Menu: tells the database what
+   happened (see leaveRace), then returns to the setup screen. */
+function leaveDash(){
+  const d = state.dash;
+  if(d){
+    leaveRace(d.code, d.uid, {
+      isHost: d.isHost,
+      status: d.race ? d.race.status : 'waiting',
+      raceOver: isRaceOver(d.race),
+    });
+  }
+  resetToSetup();
+}
+
+el.dashLobbyLeaveBtn.addEventListener('click', leaveDash);
+el.dashBackBtn.addEventListener('click', leaveDash);
+el.dashLeaveBtn.addEventListener('click', () => {
+  if(confirm('Leave the race? Your avatar will be marked as left.')) leaveDash();
+});
+el.dashStartBtn.addEventListener('click', async () => {
+  const d = state.dash;
+  if(!d) return;
+  el.dashStartBtn.disabled = true;
+  try{
+    await startRace(d.code);
+  } catch (err){
+    console.error('Failed to start Ratio Dash race:', err);
+    el.dashLobbyStatus.textContent = 'Could not start the race. Please try again.';
+    el.dashStartBtn.disabled = false;
+  }
+});
+
+function handleDashWaitTimeout(){
+  const d = state.dash;
+  if(!d) return;
+  d.waitTimer = null;
+  deleteRace(d.code).catch(() => {});
+  resetToSetup();
+  el.setupError.textContent = 'No one started the race within 10 minutes, so it was cancelled.';
+}
+
+/* Dev-only test aid: open the app with ?dashbots=N (N = 1-9) on the dev
+   server and the HOST's client adds N fake racers to what it displays, so
+   the 10-player layout can be checked alone. The bots exist only in that
+   one browser — nothing about them is written to the database — and they
+   are compiled out of production builds. */
+const DASH_DEV_BOTS = import.meta.env.DEV
+  ? Math.min(DASH_MAX_PLAYERS - 1, Math.max(0, parseInt(new URLSearchParams(window.location.search).get('dashbots'), 10) || 0))
+  : 0;
+
+function createDashBots(){
+  const bots = {};
+  for(let i = 1; i <= DASH_DEV_BOTS; i++){
+    bots[`bot${i}`] = {
+      uid: `bot${i}`, name: `Bot ${i}`, avatarSeed: `bot${i}`,
+      joinedAt: Date.now() + i, position: 0, correctCount: 0, wrongCount: 0,
+      finished: false, connected: true, nextMoveAt: 0,
+    };
+  }
+  return bots;
+}
+
+function mergeDashBots(race){
+  const d = state.dash;
+  return { ...race, players: { ...race.players, ...d.bots }, winnerUid: race.winnerUid || d.botWinnerUid || null };
+}
+
+function startDashBots(){
+  const d = state.dash;
+  d.botTimer = setInterval(() => {
+    if(!state.dash || d.ending) return;
+    const now = Date.now();
+    Object.values(d.bots).forEach((bot) => {
+      if(bot.finished || now < bot.nextMoveAt) return;
+      const correct = Math.random() < 0.8;
+      bot.position = nextPosition(bot.position, correct);
+      if(correct) bot.correctCount++; else bot.wrongCount++;
+      bot.nextMoveAt = now + 900 + Math.random() * 2600;
+      if(bot.position >= DASH_TRACK_LENGTH){
+        bot.finished = true;
+        if(!d.botWinnerUid) d.botWinnerUid = bot.uid;
+      }
+    });
+    if(d.raw) onDashUpdate(d.raw);
+  }, 400);
+}
+
+function onDashUpdate(rawRace){
+  const d = state.dash;
+  if(!d) return;
+  d.raw = rawRace;
+  const race = rawRace && d.bots ? mergeDashBots(rawRace) : rawRace;
+
+  if(!race){
+    // Deleted: the host left the lobby, or the finished race was cleared.
+    // Once the end-of-race sequence is running we already have what we need.
+    if(d.ending) return;
+    resetToSetup();
+    el.setupError.textContent = 'That race was cancelled.';
+    return;
+  }
+  d.race = race;
+
+  if(isRaceOver(race)){
+    handleDashRaceEnd(race);
+    return;
+  }
+
+  if(race.status === 'waiting'){
+    if(!race.players || !race.players[d.uid]){
+      resetToSetup();
+      el.setupError.textContent = 'You were disconnected from the race lobby.';
+      return;
+    }
+    renderDashLobby(race);
+    if(d.isHost){
+      clearDashWaitTimer();
+      d.waitTimer = setTimeout(handleDashWaitTimeout, DASH_WAITING_TIMEOUT_MS);
+    }
+    return;
+  }
+
+  clearDashWaitTimer();
+  if(!d.started) startDashRaceUI(race);
+  else syncDashTrack(race);
+}
+
+/* ---------- Lobby ---------- */
+
+function renderDashLobby(race){
+  const d = state.dash;
+  const players = Object.values(race.players).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+
+  el.dashLobbySlots.innerHTML = '';
+  for(let i = 0; i < DASH_MAX_PLAYERS; i++){
+    const player = players[i];
+    const slot = document.createElement('div');
+    if(player){
+      slot.className = 'dash-slot filled' + (player.uid === d.uid ? ' you' : '');
+      const img = document.createElement('img');
+      img.className = 'dash-avatar-img';
+      img.alt = '';
+      img.src = avatarUrlForPlayer(player);
+      const name = document.createElement('span');
+      name.textContent = player.name + (player.uid === race.hostUid ? ' (Host)' : '') + (player.uid === d.uid ? ' (You)' : '');
+      slot.append(img, name);
+    } else {
+      slot.className = 'dash-slot empty';
+      slot.textContent = 'Waiting…';
+    }
+    el.dashLobbySlots.appendChild(slot);
+  }
+
+  const joined = `${players.length}/${DASH_MAX_PLAYERS} players joined`;
+  const enough = players.length >= DASH_MIN_PLAYERS;
+  el.dashBanner.innerHTML = '<span class="dash-pulse-dot"></span><span></span>';
+  const bannerText = el.dashBanner.lastElementChild;
+
+  if(d.isHost){
+    el.dashBanner.className = 'dash-banner ' + (enough ? 'ready' : 'waiting');
+    bannerText.textContent = enough
+      ? `You're hosting — ${joined}. Start whenever you're ready!`
+      : `You're hosting — waiting for players to join… (${joined})`;
+    el.dashLobbyStatus.textContent = enough ? '' : `Need at least ${DASH_MIN_PLAYERS} players to start.`;
+    el.dashStartBtn.classList.remove('hidden');
+    el.dashStartBtn.disabled = !enough;
+  } else {
+    el.dashBanner.className = 'dash-banner ready';
+    bannerText.textContent = `✅ You're in! (${joined})`;
+    el.dashLobbyStatus.textContent = 'Please wait for the host to start the race.';
+    el.dashStartBtn.classList.add('hidden');
+  }
+}
+
+/* ---------- Race ---------- */
+
+function startDashRaceUI(race){
+  const d = state.dash;
+  d.started = true;
+  d.presence.markStarted();
+
+  const me = race.players[d.uid];
+  state.allowedOps = race.settings.allowedOps;
+  state.allowNegatives = !!race.settings.allowNegatives;
+  state.timeControlSeconds = 0;
+  state.totalPairs = Number.MAX_SAFE_INTEGER; // a race has no pair limit — only the finish line ends it
+  state.pairIndex = 0;
+  state.currentPlayer = 0;
+  state.missLog = [];
+  state.opTally = {};
+  state.players = [{ name: me ? me.name : 'You', score: 0, timeRemaining: 0, correctCount: 0, wrongCount: 0, streak: 0 }];
+
+  el.dashLobbyModal.classList.add('hidden');
+  el.setupModal.classList.add('hidden');
+  el.gameScreen.classList.remove('hidden');
+  el.gameScreen.classList.add('dash-mode');
+  el.dashTrackWrap.classList.remove('hidden');
+  el.dashProgress.textContent = `0 / ${DASH_TRACK_LENGTH}`;
+  buildDashTrack(race);
+
+  announceGameStart(activeTileEffectId());
+  startDashMusic();
+  startNextPair();
+  if(d.bots) startDashBots();
+}
+
+/* Displayed position only — clamped a few percent in from each edge so an
+   avatar at 0 or at the finish never clips the track's rounded ends. */
+function positionDashAvatar(avatarEl, position){
+  const pct = Math.min(1, Math.max(0, position / DASH_TRACK_LENGTH));
+  avatarEl.style.left = `${4 + pct * 92}%`;
+}
+
+/* The track gets a bounded share of the viewport height, split evenly
+   between the racers: roomy lanes for a few players, compact (but still
+   fully visible) lanes for a full room of 10. Avatars and names scale
+   with the lane via CSS variables. */
+function sizeDashTrack(playerCount){
+  const budget = Math.min(DASH_TRACK_MAX_PX, Math.max(DASH_TRACK_MIN_PX, window.innerHeight * DASH_TRACK_VIEWPORT_SHARE));
+  const lane = Math.min(DASH_LANE_MAX_PX, Math.max(DASH_LANE_MIN_PX, budget / Math.max(1, playerCount)));
+  el.dashTrack.style.height = `${Math.round(lane * playerCount)}px`;
+  el.dashTrack.style.setProperty('--dash-avatar-size', `${Math.min(34, Math.round(lane - 4))}px`);
+  el.dashTrack.style.setProperty('--dash-name-size', lane < 30 ? '0.62rem' : '0.72rem');
+
+  // The pool sidebar is capped at the board panel's visible height (see
+  // the .game-wrap.dash-mode .pool-sidebar rule); measure it now that the
+  // track has its final size.
+  const boardArea = el.gameScreen.querySelector('.board-area');
+  el.gameScreen.style.setProperty('--dash-board-h', `${boardArea.clientHeight}px`);
+}
+
+window.addEventListener('resize', () => {
+  const d = state.dash;
+  if(d && d.started && d.race) sizeDashTrack(Object.keys(d.race.players).length);
+});
+
+function buildDashTrack(race){
+  const d = state.dash;
+  const players = Object.values(race.players).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+  el.dashTrack.innerHTML = '';
+  sizeDashTrack(players.length);
+  d.avatarEls = new Map();
+
+  players.forEach((player, lane) => {
+    const avatarEl = document.createElement('div');
+    avatarEl.className = 'dash-avatar' + (player.uid === d.uid ? ' me' : '');
+    const body = document.createElement('div');
+    body.className = 'dash-avatar-body';
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = avatarUrlForPlayer(player);
+    const name = document.createElement('span');
+    name.className = 'dash-avatar-name';
+    name.textContent = player.name;
+    body.append(img, name);
+    avatarEl.appendChild(body);
+
+    // Desynchronise idle motion so the racers never bob in lockstep.
+    avatarEl.style.setProperty('--dash-idle-delay', `${-Math.random() * 2}s`);
+    avatarEl.style.setProperty('--dash-idle-dur', `${1.6 + Math.random() * 0.9}s`);
+    avatarEl.dataset.correct = String(player.correctCount || 0);
+    avatarEl.dataset.wrong = String(player.wrongCount || 0);
+    avatarEl.style.top = `${((lane + 0.5) / players.length) * 100}%`;
+    positionDashAvatar(avatarEl, player.position || 0);
+    el.dashTrack.appendChild(avatarEl);
+    d.avatarEls.set(player.uid, avatarEl);
+  });
+}
+
+/* Positions every avatar straight from the snapshot — Firebase fires local
+   listeners immediately for our own writes, so even the local player's
+   avatar needs no separate optimistic path. Other players' answers also
+   get a quiet sound cue (our own are already played by the click). */
+function syncDashTrack(race, { silent = false } = {}){
+  const d = state.dash;
+
+  Object.values(race.players).forEach((player) => {
+    const avatarEl = d.avatarEls.get(player.uid);
+    if(!avatarEl) return; // joins are locked once the race starts
+
+    const correctCount = player.correctCount || 0;
+    const wrongCount = player.wrongCount || 0;
+    const gotCorrect = correctCount > Number(avatarEl.dataset.correct);
+    const gotWrong = wrongCount > Number(avatarEl.dataset.wrong);
+    avatarEl.dataset.correct = String(correctCount);
+    avatarEl.dataset.wrong = String(wrongCount);
+
+    if(gotCorrect || gotWrong){
+      const moveClass = gotCorrect ? 'dash-moving-fwd' : 'dash-moving-back';
+      avatarEl.classList.remove('dash-moving-fwd', 'dash-moving-back');
+      void avatarEl.offsetWidth; // restart the animation on rapid answers
+      avatarEl.classList.add(moveClass);
+      clearTimeout(avatarEl._moveTimer);
+      avatarEl._moveTimer = setTimeout(() => avatarEl.classList.remove(moveClass), 1500);
+
+      if(!silent && player.uid !== d.uid){
+        (gotCorrect ? playDashCorrect : playDashWrong)(0.45);
+      }
+    }
+
+    positionDashAvatar(avatarEl, player.position || 0);
+    avatarEl.classList.toggle('dash-finished', !!player.finished);
+    avatarEl.classList.toggle('dash-left', hasPlayerLeft(player));
+  });
+
+  const me = race.players[d.uid];
+  if(me) el.dashProgress.textContent = `${me.position || 0} / ${DASH_TRACK_LENGTH}`;
+}
+
+function handleDashTileClick(tileId){
+  const d = state.dash;
+  if(!d || !d.started || d.ending || d.finishing) return;
+  if(state.inputLocked) return;
+  const tileIdx = state.pool.findIndex(t => t.id === tileId);
+  if(tileIdx === -1) return;
+  state.inputLocked = true;
+
+  const tile = state.pool[tileIdx];
+  const activeCell = state.cells[state.cellIndex];
+  const isCorrect = tile.value === activeCell.correct;
+  const player = state.players[0];
+  const tileEl = el.poolTray.querySelector(`.tile-btn[data-tile-id="${tileId}"]`);
+  const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
+
+  d.position = nextPosition(d.position, isCorrect);
+
+  if(isCorrect){
+    d.correctCount += 1;
+    player.streak = (player.streak || 0) + 1;
+    playCorrectSound(activeTileEffectId());
+    animateTileThrow(tileEl, slotEls[0], 'correct', true);
+    state.pool.splice(tileIdx, 1); // consume the tile
+    removeTileFromDOM(tile.id);
+    slotEls.forEach(slotEl => {
+      slotEl.textContent = tile.value;
+      slotEl.classList.remove('active', 'pending');
+      slotEl.classList.add('filled', 'drop-correct');
+    });
+    el.feedbackLine.textContent = 'Correct! +1 step';
+    el.feedbackLine.className = 'feedback-line good';
+    if(isStreakMilestone(player.streak)){
+      const tier = streakTierFor(player.streak);
+      playSound(tier.sound);
+      showStreakPopup(streakPopupText(player.name, player.streak, false), tier.cssClass);
+    }
+  } else {
+    d.wrongCount += 1;
+    player.streak = 0;
+    playSound('wrong');
+    animateTileThrow(tileEl, slotEls[0], 'wrong');
+    // As in the other modes, wrong tiles stay in the pool: the same value
+    // can be the right answer for a later slot.
+    slotEls.forEach(slotEl => {
+      slotEl.classList.add('drop-wrong');
+      setTimeout(() => slotEl.classList.remove('drop-wrong'), 350);
+    });
+    el.feedbackLine.textContent = 'Not quite. Back 2 steps!';
+    el.feedbackLine.className = 'feedback-line bad';
+  }
+
+  const progress = { position: d.position, correctCount: d.correctCount, wrongCount: d.wrongCount };
+  if(d.position >= DASH_TRACK_LENGTH){
+    // Crossed the line — input stays locked; the listener ends the race.
+    d.finishing = true;
+    el.feedbackLine.textContent = '\u{1F3C1} You crossed the finish line!';
+    finishRace(d.code, d.uid, progress).catch((err) => console.error('Failed to record Ratio Dash finish:', err));
+    return;
+  }
+  reportProgress(d.code, d.uid, progress).catch((err) => console.error('Failed to report Ratio Dash progress:', err));
+
+  if(isCorrect && state.cellIndex + 1 >= state.cells.length){
+    state.cellIndex++;
+    setTimeout(() => { if(state.dash === d && !d.ending) startNextPair(); }, DASH_NEXT_PROBLEM_DELAY_MS);
+    return;
+  }
+  if(isCorrect){
+    state.cellIndex++;
+    setTimeout(() => { renderProblem(); state.inputLocked = false; }, DASH_UNLOCK_DELAY_MS);
+  } else {
+    state.inputLocked = false;
+  }
+}
+
+/* ---------- Results ---------- */
+
+function handleDashRaceEnd(race){
+  const d = state.dash;
+  if(d.ending){
+    // Already ending: if the results are up, refresh them (e.g. a late
+    // finisher's record); otherwise the pending timer uses the latest data.
+    if(d.resultsShown) renderDashResults(race);
+    return;
+  }
+  d.ending = true;
+  state.inputLocked = true;
+  stopDashMusic();
+
+  if(d.started){
+    syncDashTrack(race, { silent: true });
+    playSound('winner');
+    d.resultsTimer = setTimeout(() => {
+      d.resultsTimer = null;
+      showDashResults();
+    }, DASH_END_RESULTS_DELAY_MS);
+  } else {
+    showDashResults();
+  }
+}
+
+function showDashResults(){
+  const d = state.dash;
+  if(!d || !d.race) return;
+  d.resultsShown = true;
+  el.gameScreen.classList.add('hidden');
+  el.setupModal.classList.add('hidden');
+  el.dashLobbyModal.classList.add('hidden');
+  renderDashResults(d.race);
+  el.dashResultsModal.classList.remove('hidden');
+}
+
+function renderDashResults(race){
+  const d = state.dash;
+  const winner = race.winnerUid ? race.players[race.winnerUid] : null;
+  el.dashResultsHeading.textContent = !winner
+    ? 'Race Over'
+    : (winner.uid === d.uid ? '\u{1F3C6} You won the race!' : `${winner.name} wins the race!`);
+
+  el.dashStandings.innerHTML = '';
+  sortStandings(race.players, race.winnerUid).forEach((player, index) => {
+    const row = document.createElement('div');
+    row.className = 'dash-standing-row' + (player.uid === d.uid ? ' you' : '');
+
+    const rank = document.createElement('span');
+    rank.className = 'dash-standing-rank';
+    rank.textContent = `#${index + 1}`;
+
+    const img = document.createElement('img');
+    img.className = 'dash-avatar-img';
+    img.alt = '';
+    img.src = avatarUrlForPlayer(player);
+
+    const name = document.createElement('span');
+    name.className = 'dash-standing-name';
+    name.textContent = player.name;
+    if(hasPlayerLeft(player)){
+      const left = document.createElement('span');
+      left.className = 'dash-standing-left';
+      left.textContent = ' (left)';
+      name.appendChild(left);
+    }
+
+    const progress = document.createElement('span');
+    progress.className = 'dash-standing-progress';
+    progress.textContent = `${player.position || 0}/${DASH_TRACK_LENGTH}`;
+
+    row.append(rank, img, name, progress);
+    el.dashStandings.appendChild(row);
+  });
 }

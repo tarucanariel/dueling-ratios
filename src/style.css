@@ -2866,3 +2866,291 @@ button:focus-visible, input:focus-visible{
   .ws-answer-key h2{ color:#111111; font-size:1.1rem; }
   .ws-answer-item{ color:#222222; font-size:0.82rem; margin-bottom:5px; }
 }
+
+/* =========================================================
+   Ratio Dash — lobby, track, avatars, results. See dashRace.js /
+   the Ratio Dash section of main.js.
+   ========================================================= */
+
+.choice-row-4 .dash-chip{ grid-column:1 / -1; }
+
+/* In a race the score chips/turn flag don't apply — the track replaces them. */
+.game-wrap.dash-mode .score-bar{ display:none; }
+
+.dash-lobby-panel{ text-align:center; max-width:520px; }
+.dash-lobby-panel .primary-btn,
+.dash-lobby-panel .secondary-btn{ margin-top:10px; }
+
+.dash-lobby-slots{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(86px, 1fr));
+  gap:10px;
+  margin:16px 0 8px;
+}
+
+.dash-slot{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  padding:10px 6px;
+  border-radius:var(--radius);
+  font-size:0.78rem;
+  word-break:break-word;
+}
+.dash-slot.filled{
+  background:rgba(0,255,136,0.08);
+  border:1px solid rgba(0,255,136,0.25);
+}
+.dash-slot.you{ box-shadow:0 0 0 2px rgba(0,255,136,0.6); }
+.dash-slot.empty{
+  justify-content:center;
+  min-height:76px;
+  background:rgba(255,255,255,0.03);
+  border:1px dashed rgba(255,255,255,0.15);
+  color:var(--chalk-dim);
+}
+
+.dash-avatar-img{
+  width:48px;
+  height:48px;
+  border-radius:50%;
+  background:rgba(255,255,255,0.08);
+  image-rendering:pixelated;
+}
+
+.dash-banner{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  padding:10px 14px;
+  border-radius:var(--radius);
+  font-weight:600;
+  font-size:0.9rem;
+}
+.dash-banner.ready{
+  background:rgba(0,255,136,0.1);
+  border:1px solid rgba(0,255,136,0.35);
+  color:var(--good);
+}
+.dash-banner.waiting{
+  background:rgba(240,163,85,0.1);
+  border:1px solid rgba(240,163,85,0.35);
+  color:var(--amber);
+}
+.dash-pulse-dot{
+  flex:none;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:currentColor;
+  animation:dash-pulse 1.2s ease-in-out infinite;
+}
+@keyframes dash-pulse{
+  0%, 100%{ transform:scale(0.7); opacity:0.5; }
+  50%{ transform:scale(1.2); opacity:1; }
+}
+
+/* ----- Race track ----- */
+.dash-track-wrap{
+  background:var(--slate-light);
+  border:1px solid var(--line);
+  border-radius:var(--radius-md);
+  padding:12px 14px 22px;
+  margin-bottom:18px;
+}
+.dash-track-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:10px;
+}
+.dash-progress{
+  font-family:'JetBrains Mono', monospace;
+  font-weight:700;
+  color:var(--amber);
+}
+
+.dash-track{
+  /* Height is set inline by buildDashTrack() so every racer gets its
+     own lane — this is just a floor before JS runs. */
+  position:relative;
+  min-height:48px;
+  margin:0 26px 0 12px;
+  border-radius:var(--radius);
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 14px, transparent 14px 40px),
+    linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.08));
+  background-size:40px 100%, 100% 100%;
+  animation:dash-track-drift 2.4s linear infinite;
+}
+@keyframes dash-track-drift{
+  from{ background-position:0 0, 0 0; }
+  to{ background-position:-40px 0, 0 0; }
+}
+.dash-track::after{
+  content:"\1F3C1";
+  position:absolute;
+  right:-22px;
+  top:50%;
+  transform:translateY(-50%);
+  font-size:1.5rem;
+  animation:dash-flag-wave 1.6s ease-in-out infinite;
+}
+@keyframes dash-flag-wave{
+  0%, 100%{ transform:translateY(-50%) rotate(-6deg); }
+  50%{ transform:translateY(-58%) rotate(6deg); }
+}
+
+.dash-avatar{
+  position:absolute;
+  transform:translate(-50%, -50%);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  /* a short beat, then a long ease-out so the avatar settles softly */
+  transition:left 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s;
+  will-change:left;
+}
+.dash-avatar-body{
+  position:relative;
+  display:block;
+  line-height:0;
+  transform-origin:50% 90%;
+  animation:dash-idle var(--dash-idle-dur, 2s) ease-in-out var(--dash-idle-delay, 0s) infinite;
+}
+.dash-avatar-body img{
+  /* --dash-avatar-size / --dash-name-size are set by sizeDashTrack() so
+     avatars shrink with their lane when the room is full. */
+  width:var(--dash-avatar-size, 34px);
+  height:var(--dash-avatar-size, 34px);
+  border-radius:50%;
+  border:2px solid var(--primary);
+  background:rgba(255,255,255,0.08);
+  image-rendering:pixelated;
+}
+.dash-avatar.me .dash-avatar-body img{ border-color:var(--amber); }
+.dash-avatar-name{
+  position:absolute;
+  right:calc(100% + 6px);
+  top:50%;
+  transform:translateY(-50%);
+  font-size:var(--dash-name-size, 0.72rem);
+  line-height:1.2;
+  color:var(--chalk);
+  text-shadow:0 1px 3px rgba(0,0,0,0.7);
+  white-space:nowrap;
+  max-width:96px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.dash-avatar.dash-moving-fwd .dash-avatar-body{
+  animation:dash-run-fwd 1.2s ease-in-out 0.15s both, dash-idle var(--dash-idle-dur, 2s) ease-in-out 1.4s infinite;
+}
+.dash-avatar.dash-moving-back .dash-avatar-body{
+  animation:dash-shake 0.6s ease-in-out both, dash-idle var(--dash-idle-dur, 2s) ease-in-out 0.6s infinite;
+}
+.dash-avatar.dash-finished .dash-avatar-body img{ border-color:var(--good); }
+.dash-avatar.dash-left .dash-avatar-body img{ filter:grayscale(1); opacity:0.45; }
+.dash-avatar.dash-left .dash-avatar-name::after{ content:" (left)"; }
+
+@keyframes dash-idle{
+  0%, 100%{ transform:translateY(0) rotate(-2deg); }
+  50%{ transform:translateY(-4px) rotate(2deg); }
+}
+@keyframes dash-run-fwd{
+  0%, 100%{ transform:translateY(0) rotate(0deg); }
+  15%{ transform:rotate(10deg) scale(1.05, 0.95); }
+  35%{ transform:translateY(-8px) rotate(8deg); }
+  55%{ transform:translateY(0) rotate(6deg); }
+  75%{ transform:translateY(-5px) rotate(4deg); }
+}
+@keyframes dash-shake{
+  0%, 100%{ transform:translateX(0) rotate(0deg); }
+  20%{ transform:translateX(-5px) rotate(-8deg); }
+  40%{ transform:translateX(5px) rotate(8deg); }
+  60%{ transform:translateX(-4px) rotate(-5deg); }
+  80%{ transform:translateX(3px) rotate(3deg); }
+}
+@media (prefers-reduced-motion: reduce){
+  .dash-avatar-body, .dash-track, .dash-track::after, .dash-pulse-dot{ animation:none !important; }
+  .dash-avatar{ transition-duration:0.3s; transition-delay:0s; }
+}
+
+/* ----- Results ----- */
+.dash-standings{ margin:14px 0 18px; text-align:left; }
+.dash-standing-row{
+  display:grid;
+  grid-template-columns:2.4rem auto 1fr auto;
+  align-items:center;
+  gap:12px;
+  padding:8px 10px;
+  border-radius:var(--radius);
+}
+.dash-standing-row:nth-child(odd){ background:rgba(255,255,255,0.04); }
+.dash-standing-row.you{ box-shadow:0 0 0 1px var(--amber) inset; }
+.dash-standing-rank{ font-weight:700; color:var(--amber); }
+.dash-standing-name{ word-break:break-word; }
+.dash-standing-left{ opacity:0.6; font-size:0.85em; }
+.dash-standing-progress{ color:var(--chalk-dim); font-size:0.85rem; font-family:'JetBrains Mono', monospace; }
+
+@media (max-width:480px){
+  .dash-track{ margin-left:8px; }
+  .dash-avatar-name{ max-width:64px; }
+}
+
+/* ----- Race screen fits the viewport -----
+   In a race the screen is a fixed-height column: the track stays pinned
+   at the top (always fully visible, even with 10 racers) and only the
+   problem + tile pool scroll, inside .board-area. */
+.game-wrap.dash-mode{
+  height:calc(100vh - 48px);
+  height:calc(100dvh - 48px);
+  display:flex;
+  flex-direction:column;
+}
+.game-wrap.dash-mode .dash-track-wrap{
+  flex:none;
+  margin-bottom:12px;
+  padding:10px 14px 16px;
+}
+.game-wrap.dash-mode .board-area{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+}
+@media (max-width:520px){
+  .game-wrap.dash-mode{ height:calc(100vh - 20px); height:calc(100dvh - 20px); }
+}
+@media (max-width:430px){
+  .game-wrap.dash-mode{ height:calc(100vh - 16px); height:calc(100dvh - 16px); }
+}
+
+/* The pool sits in a sticky sidebar; capped only at 60vh it could be taller
+   than the visible board panel, so its lower tiles could never be reached
+   (the sidebar stays pinned while the panel scrolls). In a race the sidebar
+   is capped at the panel's real height (--dash-board-h, set by
+   sizeDashTrack) and the tray scrolls inside it. The scrollbar is shown,
+   thin, so it's clear there are more tiles below. */
+.game-wrap.dash-mode .pool-sidebar{
+  top:0;
+  max-height:calc(var(--dash-board-h, 100vh) - 56px);
+  min-height:0;
+}
+.game-wrap.dash-mode .pool-tray{
+  flex:1 1 auto;
+  min-height:0;
+  max-height:none;
+  scrollbar-width:thin;
+  scrollbar-color:var(--secondary) transparent;
+  -ms-overflow-style:auto;
+}
+.game-wrap.dash-mode .pool-tray::-webkit-scrollbar{
+  display:block;
+  width:5px;
+}
+.game-wrap.dash-mode .pool-tray::-webkit-scrollbar-thumb{
+  background:var(--secondary);
+  border-radius:3px;
+}
