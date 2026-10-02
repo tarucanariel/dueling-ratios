@@ -28,6 +28,30 @@ export function isCompetitiveRace(playersObj){
   return humanCount(playersObj) >= 2;
 }
 
+// A race with no activity (no answer, join or start) for this long is
+// considered dead: hidden from the teacher's list and deleted from the
+// database. Every answer refreshes lastActivityAt, so a live race never
+// goes this quiet.
+export const DASH_STALE_MS = 15 * 60 * 1000;
+
+/* True once a race is no longer worth listing or keeping:
+   - it has been idle past DASH_STALE_MS, or
+   - it has already ended, or
+   - it is mid-race but every real player has disconnected (abandoned).
+   `idleOnly` limits the check to the idle test — that is the only part
+   the database rules let a non-host delete. */
+export function isRaceStale(race, now = Date.now(), { idleOnly = false } = {}){
+  if(!race) return true;
+  const idle = now - (race.lastActivityAt || race.createdAt || 0) > DASH_STALE_MS;
+  if(idleOnly) return idle;
+  if(idle || isRaceOver(race)) return true;
+  if(race.status === 'active'){
+    const humans = Object.values(race.players || {}).filter(p => !p.isBot);
+    if(humans.length > 0 && humans.every(p => p.connected === false)) return true;
+  }
+  return false;
+}
+
 /* A racer counts as "left" once their presence flag flips to false
    (see trackDashPresence in dashRace.js). Finished racers are never
    "left" — closing the tab after crossing the line is normal. */

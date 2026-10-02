@@ -10,8 +10,8 @@ import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './
 import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
 import { isResultTie } from './results.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
-import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, rejoinRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
-import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, humanCount, isCompetitiveRace, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
+import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, listenToAllRaces, pruneStaleRaces, rejoinRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
+import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, humanCount, isCompetitiveRace, isRaceStale, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
 import { avatarUrlForPlayer } from './dashAvatar.js';
 import { playDashCorrect, playDashWrong, playDashCountdownTick, startDashMusic, stopDashMusic } from './dashAudio.js';
 
@@ -84,6 +84,10 @@ const state = {
   spectateRoom: null,        // last-seen snapshot of the watched room, for prev-vs-new diffing
   unsubscribeSpectateRoom: null,
   unsubscribeRoomsList: null,
+  unsubscribeRacesList: null, // Ratio Dash races in the same Watch Games list
+  watchRooms: {},             // latest /rooms and /dashRaces snapshots, merged into one list by renderWatchList
+  watchRaces: {},
+  dashSpec: null,             // teacher's live view of one Ratio Dash race, or null — see startDashSpectating()
   spectateTimerId: null,     // display-only poll; never writes to the room
 };
 
@@ -122,6 +126,9 @@ const el = {
   dashCountdown: document.getElementById('dash-countdown'),
   dashCountdownNum: document.getElementById('dash-countdown-num'),
   dashLobbyRules: document.getElementById('dash-lobby-rules'),
+  dashSpecPanel: document.getElementById('dash-spec-panel'),
+  dashSpecHeading: document.getElementById('dash-spec-heading'),
+  dashSpecStandings: document.getElementById('dash-spec-standings'),
   dashTrackWrap: document.getElementById('dash-track-wrap'),
   dashTrack: document.getElementById('dash-track'),
   dashProgress: document.getElementById('dash-progress'),
@@ -3308,7 +3315,18 @@ async function handleTeacherGoogleSignIn(){
 function openWatchList(){
   el.watchListModal.classList.remove('hidden');
   if(!state.unsubscribeRoomsList){
-    state.unsubscribeRoomsList = listenToAllRooms(renderWatchList);
+    state.unsubscribeRoomsList = listenToAllRooms((rooms) => {
+      state.watchRooms = rooms || {};
+      pruneStaleRooms(state.watchRooms).catch(() => { /* best-effort; next snapshot will retry */ });
+      renderWatchList();
+    });
+  }
+  if(!state.unsubscribeRacesList){
+    state.unsubscribeRacesList = listenToAllRaces((races) => {
+      state.watchRaces = races || {};
+      pruneStaleRaces(state.watchRaces); // clear out dead races as the list is seen (best-effort)
+      renderWatchList();
+    });
   }
 }
 
@@ -3318,21 +3336,55 @@ function closeWatchList(){
     state.unsubscribeRoomsList();
     state.unsubscribeRoomsList = null;
   }
+  if(state.unsubscribeRacesList){
+    state.unsubscribeRacesList();
+    state.unsubscribeRacesList = null;
+  }
 }
 
-function renderWatchList(roomsObj){
-  pruneStaleRooms(roomsObj).catch(() => { /* best-effort; next snapshot will retry */ });
+function escapeHtml(text){
+  return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
-  const rooms = Object.entries(roomsObj || {})
+/* One list for everything a teacher can watch: 1v1 online games, then
+   Ratio Dash races. Rebuilt from the latest snapshot of each feed
+   whenever either changes. */
+function renderWatchList(){
+  const rooms = Object.entries(state.watchRooms || {})
     .filter(([, room]) => room && !isRoomStale(room) && (room.status === 'active' || room.status === 'waiting'))
     .sort(([, a], [, b]) => (b.createdAt || 0) - (a.createdAt || 0));
 
-  if(rooms.length === 0){
-    el.watchListBody.innerHTML = '<p class="watch-empty">No online games are currently being played.</p>';
+  const races = Object.entries(state.watchRaces || {})
+    .filter(([, race]) => race && race.players && !isRaceStale(race) && (race.status === 'active' || race.status === 'waiting'))
+    .sort(([, a], [, b]) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  if(rooms.length === 0 && races.length === 0){
+    el.watchListBody.innerHTML = '<p class="watch-empty">No online games or races are currently being played.</p>';
     return;
   }
 
-  el.watchListBody.innerHTML = rooms.map(([code, room]) => {
+  const raceRows = races.map(([code, race]) => {
+    const players = Object.values(race.players);
+    const bots = players.filter(p => p.isBot).length;
+    const host = race.players[race.hostUid];
+    const active = race.status === 'active';
+    const trackLength = (race.settings && race.settings.trackLength) || DASH_TRACK_LENGTH;
+    const leader = players.reduce((best, p) => Math.max(best, p.position || 0), 0);
+    const racers = `${players.length} racer${players.length === 1 ? '' : 's'}${bots > 0 ? ` (${bots} bot${bots === 1 ? '' : 's'})` : ''}`;
+    const progress = active ? `Leader at ${leader}/${trackLength}` : 'In the lobby';
+
+    return `
+      <div class="watch-row">
+        <div class="watch-row-info">
+          <span class="watch-room-code">${escapeHtml(code)}</span>
+          <span class="watch-room-names">\u{1F3C1} Ratio Dash \u00B7 ${escapeHtml(host ? host.name : 'Unknown host')}'s race \u00B7 ${racers}</span>
+          <span class="watch-room-progress">${progress}</span>
+        </div>
+        <button class="secondary-btn watch-row-btn" data-dash-code="${escapeHtml(code)}" ${active ? '' : 'disabled'} type="button">${active ? 'Watch' : 'Waiting\u2026'}</button>
+      </div>`;
+  }).join('');
+
+  const roomRows = rooms.map(([code, room]) => {
     const host = room.players?.host;
     const guest = room.players?.guest;
     if(!host) return ''; // malformed/partial room, skip defensively
@@ -3359,8 +3411,15 @@ function renderWatchList(roomsObj){
       </div>`;
   }).join('');
 
-  el.watchListBody.querySelectorAll('.watch-row-btn:not(:disabled)').forEach(btn => {
+  el.watchListBody.innerHTML =
+    (roomRows ? `<h3 class="watch-section-heading">Online games</h3>${roomRows}` : '') +
+    (raceRows ? `<h3 class="watch-section-heading">Ratio Dash races</h3>${raceRows}` : '');
+
+  el.watchListBody.querySelectorAll('.watch-row-btn[data-room-code]:not(:disabled)').forEach(btn => {
     btn.addEventListener('click', () => startSpectating(btn.dataset.roomCode));
+  });
+  el.watchListBody.querySelectorAll('.watch-row-btn[data-dash-code]:not(:disabled)').forEach(btn => {
+    btn.addEventListener('click', () => startDashSpectating(btn.dataset.dashCode));
   });
 }
 
@@ -3387,6 +3446,7 @@ function startSpectating(code){
 }
 
 function stopSpectating(backToList){
+  stopDashSpectating();
   if(state.unsubscribeSpectateRoom){
     state.unsubscribeSpectateRoom();
     state.unsubscribeSpectateRoom = null;
@@ -5267,6 +5327,7 @@ const DASH_TRACK_MIN_PX = 120;         // ...clamped to this range
 const DASH_TRACK_MAX_PX = 280;
 const DASH_LANE_MIN_PX = 22;           // smallest lane (full room on a short screen)
 const DASH_LANE_MAX_PX = 44;           // roomiest lane (few players)
+const DASH_SPECTATE_TRACK = { share: 0.42, maxPx: 400 }; // a teacher's view has no board, so the track can be taller
 
 function selectDashChoice(choice){
   state.dashChoice = choice;
@@ -5791,8 +5852,8 @@ function updateDashRank(race){
 
 /* Displayed position only — clamped a few percent in from each edge so an
    avatar at 0 or at the finish never clips the track's rounded ends. */
-function positionDashAvatar(avatarEl, position){
-  const pct = Math.min(1, Math.max(0, position / state.dash.trackLength));
+function positionDashAvatar(avatarEl, position, trackLength){
+  const pct = Math.min(1, Math.max(0, position / trackLength));
   avatarEl.style.left = `${4 + pct * 92}%`;
 }
 
@@ -5800,8 +5861,8 @@ function positionDashAvatar(avatarEl, position){
    between the racers: roomy lanes for a few players, compact (but still
    fully visible) lanes for a full room of 10. Avatars and names scale
    with the lane via CSS variables. */
-function sizeDashTrack(playerCount){
-  const budget = Math.min(DASH_TRACK_MAX_PX, Math.max(DASH_TRACK_MIN_PX, window.innerHeight * DASH_TRACK_VIEWPORT_SHARE));
+function sizeDashTrack(playerCount, { share = DASH_TRACK_VIEWPORT_SHARE, maxPx = DASH_TRACK_MAX_PX } = {}){
+  const budget = Math.min(maxPx, Math.max(DASH_TRACK_MIN_PX, window.innerHeight * share));
   const lane = Math.min(DASH_LANE_MAX_PX, Math.max(DASH_LANE_MIN_PX, budget / Math.max(1, playerCount)));
   el.dashTrack.style.height = `${Math.round(lane * playerCount)}px`;
   el.dashTrack.style.setProperty('--dash-avatar-size', `${Math.min(34, Math.round(lane - 4))}px`);
@@ -5817,14 +5878,18 @@ function sizeDashTrack(playerCount){
 
 window.addEventListener('resize', () => {
   const d = state.dash;
+  const spec = state.dashSpec;
   if(d && d.started && d.race) sizeDashTrack(Object.keys(d.race.players).length);
+  else if(spec && spec.race) sizeDashTrack(Object.keys(spec.race.players).length, DASH_SPECTATE_TRACK);
 });
 
-function buildDashTrack(race){
-  const d = state.dash;
+/* `session` is whoever owns the track on screen: the live race state.dash
+   (the default) or a teacher's read-only state.dashSpec. */
+function buildDashTrack(race, session = state.dash){
+  const d = session;
   const players = Object.values(race.players).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
   el.dashTrack.innerHTML = '';
-  sizeDashTrack(players.length);
+  sizeDashTrack(players.length, d === state.dashSpec ? DASH_SPECTATE_TRACK : undefined);
   d.avatarEls = new Map();
 
   players.forEach((player, lane) => {
@@ -5847,7 +5912,7 @@ function buildDashTrack(race){
     avatarEl.dataset.correct = String(player.correctCount || 0);
     avatarEl.dataset.wrong = String(player.wrongCount || 0);
     avatarEl.style.top = `${((lane + 0.5) / players.length) * 100}%`;
-    positionDashAvatar(avatarEl, player.position || 0);
+    positionDashAvatar(avatarEl, player.position || 0, d.trackLength);
     el.dashTrack.appendChild(avatarEl);
     d.avatarEls.set(player.uid, avatarEl);
   });
@@ -5857,8 +5922,8 @@ function buildDashTrack(race){
    listeners immediately for our own writes, so even the local player's
    avatar needs no separate optimistic path. Other players' answers also
    get a quiet sound cue (our own are already played by the click). */
-function syncDashTrack(race, { silent = false } = {}){
-  const d = state.dash;
+function syncDashTrack(race, { silent = false, session = null } = {}){
+  const d = session || state.dash;
 
   Object.values(race.players).forEach((player) => {
     const avatarEl = d.avatarEls.get(player.uid);
@@ -5884,11 +5949,12 @@ function syncDashTrack(race, { silent = false } = {}){
       }
     }
 
-    positionDashAvatar(avatarEl, player.position || 0);
+    positionDashAvatar(avatarEl, player.position || 0, d.trackLength);
     avatarEl.classList.toggle('dash-finished', !!player.finished);
     avatarEl.classList.toggle('dash-left', hasPlayerLeft(player));
   });
 
+  if(session) return; // a spectator has no "me": no personal progress or place badge
   const me = race.players[d.uid];
   if(me) el.dashProgress.textContent = `${me.position || 0} / ${d.trackLength}`;
   updateDashRank(race);
@@ -5973,6 +6039,123 @@ function handleDashTileClick(tileId){
   } else {
     state.inputLocked = false;
   }
+}
+
+/* ---------- Teacher spectator view ----------
+   Opened from the Watch Games list. Read-only: the same pinned track as a
+   racer sees, but with a live standings table (hits, misses, accuracy)
+   where the problem would be, so a teacher can see who is racing ahead
+   and who is struggling. It never writes anything. */
+
+function startDashSpectating(code){
+  closeWatchList(); // stop the all-rooms/all-races listeners while focused on one race
+  state.spectating = true;
+  state.spectateRoomCode = code;
+  const spec = state.dashSpec = {
+    code,
+    race: null,
+    built: false,
+    trackLength: DASH_TRACK_LENGTH,
+    avatarEls: new Map(),
+    unsub: null,
+  };
+
+  el.spectateBar.classList.remove('hidden');
+  el.spectateRoomCodeLabel.textContent = code;
+  el.setupModal.classList.add('hidden');
+  el.gameScreen.classList.remove('hidden');
+  el.gameScreen.classList.add('dash-mode', 'dash-spectating');
+  el.dashTrackWrap.classList.remove('hidden');
+  el.dashSpecPanel.classList.remove('hidden');
+  el.dashProgress.textContent = '';
+
+  spec.unsub = listenToRace(code, onDashSpecUpdate);
+}
+
+function onDashSpecUpdate(race){
+  const spec = state.dashSpec;
+  if(!spec) return;
+  if(!race){
+    // The race was cleared (finished and tidied up, or cancelled) — back to the list.
+    stopSpectating(true);
+    return;
+  }
+  spec.race = race;
+  spec.trackLength = (race.settings && race.settings.trackLength) || DASH_TRACK_LENGTH;
+  if(!spec.built){
+    spec.built = true;
+    buildDashTrack(race, spec);
+  }
+  syncDashTrack(race, { silent: true, session: spec });
+  renderDashSpecStandings(race);
+}
+
+function renderDashSpecStandings(race){
+  const spec = state.dashSpec;
+  const over = isRaceOver(race);
+  const winner = race.winnerUid ? race.players[race.winnerUid] : null;
+  const leader = Object.values(race.players).reduce((best, p) => Math.max(best, p.position || 0), 0);
+
+  el.dashProgress.textContent = over ? 'Race over' : `Leader ${leader} / ${spec.trackLength}`;
+  el.dashSpecHeading.textContent = over
+    ? (winner ? `\u{1F3C1} Race finished \u2014 ${winner.name} wins` : 'Race finished')
+    : (race.status === 'waiting' ? 'Waiting in the lobby' : 'Live standings');
+
+  el.dashSpecStandings.innerHTML = '';
+  sortStandings(race.players, race.winnerUid).forEach((player, index) => {
+    const answered = (player.correctCount || 0) + (player.wrongCount || 0);
+    const accuracy = answered === 0 ? '\u2014' : Math.round(((player.correctCount || 0) / answered) * 100) + '%';
+    const pct = Math.min(100, Math.round(((player.position || 0) / spec.trackLength) * 100));
+
+    const row = document.createElement('div');
+    row.className = 'dash-spec-row';
+
+    const rank = document.createElement('span');
+    rank.className = 'dash-standing-rank';
+    rank.textContent = `#${index + 1}`;
+
+    const img = document.createElement('img');
+    img.className = 'dash-avatar-img';
+    img.alt = '';
+    img.src = avatarUrlForPlayer(player);
+
+    const main = document.createElement('div');
+    main.className = 'dash-spec-main';
+    const name = document.createElement('span');
+    name.className = 'dash-standing-name';
+    name.textContent = player.name + (player.uid === race.winnerUid ? ' \u{1F3C6}' : '');
+    if(hasPlayerLeft(player)){
+      const left = document.createElement('span');
+      left.className = 'dash-standing-left';
+      left.textContent = ' (left)';
+      name.appendChild(left);
+    }
+    const bar = document.createElement('div');
+    bar.className = 'dash-spec-bar';
+    const fill = document.createElement('div');
+    fill.className = 'dash-spec-bar-fill';
+    fill.style.width = `${pct}%`;
+    bar.appendChild(fill);
+    main.append(name, bar);
+
+    const stats = document.createElement('span');
+    stats.className = 'dash-spec-stats';
+    stats.textContent = `${player.position || 0}/${spec.trackLength} \u00B7 \u2713${player.correctCount || 0} \u2717${player.wrongCount || 0} \u00B7 ${accuracy}`;
+
+    row.append(rank, img, main, stats);
+    el.dashSpecStandings.appendChild(row);
+  });
+}
+
+function stopDashSpectating(){
+  const spec = state.dashSpec;
+  if(!spec) return; // not spectating — leave a live race's screen alone
+  el.gameScreen.classList.remove('dash-mode', 'dash-spectating');
+  el.dashSpecPanel.classList.add('hidden');
+  if(spec.unsub) spec.unsub();
+  state.dashSpec = null;
+  el.dashTrackWrap.classList.add('hidden');
+  el.dashTrack.innerHTML = '';
 }
 
 /* ---------- Results ---------- */

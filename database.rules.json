@@ -7,7 +7,7 @@
     "dashRaces": {
       ".read": "auth != null",
       "$code": {
-        ".write": "auth != null && ((!data.exists() && newData.child('hostUid').val() === auth.uid && newData.child('status').val() === 'waiting') || (data.exists() && !newData.exists() && (data.child('hostUid').val() === auth.uid || !data.child('lastActivityAt').exists() || now > data.child('lastActivityAt').val() + 7200000)))",
+        ".write": "auth != null && ((!data.exists() && newData.child('hostUid').val() === auth.uid && newData.child('status').val() === 'waiting') || (data.exists() && !newData.exists() && (data.child('hostUid').val() === auth.uid || !data.child('lastActivityAt').exists() || now > data.child('lastActivityAt').val() + 900000)))",
         "status": {
           ".write": "auth != null && ((data.val() === 'waiting' && newData.val() === 'active' && root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid) || (data.val() === 'active' && newData.val() === 'completed' && (root.child('dashRaces/' + $code + '/winnerUid').val() === auth.uid || (root.child('dashRaces/' + $code + '/hostUid').val() === auth.uid && root.child('dashRaces/' + $code + '/winnerUid').val().matches(/^bot[0-9]+$/)))))"
         },

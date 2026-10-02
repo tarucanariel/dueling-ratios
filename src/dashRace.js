@@ -23,12 +23,11 @@
 
 import { ref, set, get, update, remove, onValue, off, onDisconnect, serverTimestamp, runTransaction } from "firebase/database";
 import { db, auth, ensureSignedIn } from "./firebase.js";
-import { DASH_MAX_PLAYERS, DASH_MAX_BOTS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, isRaceOver } from "./dashLogic.js";
+import { DASH_MAX_PLAYERS, DASH_MAX_BOTS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, isRaceOver, isRaceStale } from "./dashLogic.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I, same as online.js
 export const DASH_CODE_LENGTH = 4;
 export const DASH_WAITING_TIMEOUT_MS = 10 * 60 * 1000; // an un-started lobby is auto-cancelled after this
-const STALE_RACE_MS = 2 * 60 * 60 * 1000; // any race this long without activity is just DB clutter
 
 function generateCode(){
   let code = "";
@@ -98,15 +97,20 @@ async function currentUid(){
   return auth.currentUser.uid;
 }
 
-/* Best-effort sweep so finished/abandoned races don't pile up. Rules let
-   anyone delete a race that's been idle past STALE_RACE_MS. */
-async function pruneStaleRaces(){
+/* Best-effort sweep so dead races don't pile up. The database rules let
+   anyone delete a race that has been idle past DASH_STALE_MS (and the
+   host delete their own), so that is the test used here. Given the
+   current races if the caller already has them (the teacher's list does),
+   otherwise reads them. */
+export async function pruneStaleRaces(races){
   try{
-    const snap = await get(ref(db, "dashRaces"));
-    const races = snap.val() || {};
+    if(!races){
+      const snap = await get(ref(db, "dashRaces"));
+      races = snap.val() || {};
+    }
     const now = Date.now();
     await Promise.all(Object.entries(races)
-      .filter(([, race]) => now - (race.lastActivityAt || race.createdAt || 0) > STALE_RACE_MS)
+      .filter(([, race]) => isRaceStale(race, now, { idleOnly: true }))
       .map(([code]) => remove(raceRef(code))));
   } catch (err){ /* best-effort */ }
 }
@@ -307,6 +311,16 @@ export function listenToRace(code, callback){
   const handler = (snap) => callback(snap.val());
   onValue(r, handler);
   return () => off(r, "value", handler);
+}
+
+/* For the teacher's Watch Games list: subscribes to every race so the
+   list updates live. The callback gets a plain object keyed by race
+   code, or {} if there are none. Returns an unsubscribe function. */
+export function listenToAllRaces(callback){
+  const racesRef = ref(db, "dashRaces");
+  const handler = (snap) => callback(snap.val() || {});
+  onValue(racesRef, handler);
+  return () => off(racesRef, "value", handler);
 }
 
 export function deleteRace(code){

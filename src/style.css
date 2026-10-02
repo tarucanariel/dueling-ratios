@@ -3249,3 +3249,74 @@ button:focus-visible, input:focus-visible{
   position:fixed;
   z-index:200;
 }
+
+/* ----- Teacher spectator view of a Ratio Dash race ----- */
+.game-wrap.dash-spectating .board-area,
+.game-wrap.dash-spectating .dash-leave-icon-btn,
+.game-wrap.dash-spectating .dash-rank,
+.game-wrap.dash-spectating .dash-countdown{ display:none; }
+
+.dash-spec-panel{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  background:var(--slate-light);
+  border:1px solid var(--line);
+  border-radius:var(--radius-md);
+  padding:14px 16px;
+}
+.dash-spec-heading{
+  margin:0 0 10px;
+  font-family:'Sora', 'Inter', sans-serif;
+  font-size:1rem;
+}
+.dash-spec-row{
+  display:grid;
+  grid-template-columns:2.2rem auto 1fr auto;
+  align-items:center;
+  gap:10px;
+  padding:7px 8px;
+  border-radius:var(--radius);
+}
+.dash-spec-row:nth-child(odd){ background:rgba(255,255,255,0.04); }
+.dash-spec-row .dash-avatar-img{ width:34px; height:34px; }
+.dash-spec-main{ min-width:0; }
+.dash-spec-main .dash-standing-name{
+  display:block;
+  font-size:0.88rem;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.dash-spec-bar{
+  height:5px;
+  margin-top:5px;
+  border-radius:3px;
+  background:rgba(255,255,255,0.08);
+  overflow:hidden;
+}
+.dash-spec-bar-fill{
+  height:100%;
+  border-radius:3px;
+  background:var(--btn-gradient);
+  transition:width 0.6s ease-out;
+}
+.dash-spec-stats{
+  font-family:'JetBrains Mono', monospace;
+  font-size:0.74rem;
+  color:var(--chalk-dim);
+  white-space:nowrap;
+}
+@media (max-width:480px){
+  .dash-spec-row{ grid-template-columns:1.8rem auto 1fr; }
+  .dash-spec-stats{ grid-column:2 / -1; }
+}
+
+.watch-section-heading{
+  margin:14px 0 6px;
+  font-size:0.78rem;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  color:var(--chalk-dim);
+}
+.watch-section-heading:first-child{ margin-top:0; }

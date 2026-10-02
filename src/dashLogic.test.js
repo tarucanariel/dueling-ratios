@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextPosition, sortStandings, hasPlayerLeft, isRaceOver, rankOf, ordinal, humanCount, isCompetitiveRace, DASH_TRACK_LENGTH, DASH_MAX_BOTS } from './dashLogic.js';
+import { nextPosition, sortStandings, hasPlayerLeft, isRaceOver, rankOf, ordinal, humanCount, isCompetitiveRace, isRaceStale, DASH_STALE_MS, DASH_TRACK_LENGTH, DASH_MAX_BOTS } from './dashLogic.js';
 
 describe('nextPosition', () => {
   it('moves one step forward on a correct answer', () => {
@@ -134,5 +134,46 @@ describe('bots', () => {
 
   it('leaves the host a slot', () => {
     expect(DASH_MAX_BOTS).toBe(9);
+  });
+});
+
+describe('isRaceStale', () => {
+  const now = 10_000_000;
+  const fresh = { status: 'active', lastActivityAt: now - 1000, players: { a: { uid: 'a', connected: true } } };
+
+  it('keeps a recently active race', () => {
+    expect(isRaceStale(fresh, now)).toBe(false);
+  });
+
+  it('drops a race idle past the limit', () => {
+    expect(isRaceStale({ ...fresh, lastActivityAt: now - DASH_STALE_MS - 1 }, now)).toBe(true);
+    expect(isRaceStale({ status: 'waiting', createdAt: now - DASH_STALE_MS - 1, players: {} }, now)).toBe(true);
+  });
+
+  it('drops a finished race', () => {
+    expect(isRaceStale({ ...fresh, winnerUid: 'a' }, now)).toBe(true);
+    expect(isRaceStale({ ...fresh, status: 'completed' }, now)).toBe(true);
+  });
+
+  it('drops a live race once every real player has disconnected, ignoring bots', () => {
+    const abandoned = {
+      ...fresh,
+      players: { a: { uid: 'a', connected: false }, bot1: { uid: 'bot1', isBot: true, connected: true } },
+    };
+    expect(isRaceStale(abandoned, now)).toBe(true);
+    expect(isRaceStale({ ...abandoned, players: { ...abandoned.players, b: { uid: 'b', connected: true } } }, now)).toBe(false);
+  });
+
+  it('does not treat a lobby as abandoned just because someone is mid-reconnect', () => {
+    expect(isRaceStale({ ...fresh, status: 'waiting', players: { a: { uid: 'a', connected: false } } }, now)).toBe(false);
+  });
+
+  it('with idleOnly, ignores everything but the idle test', () => {
+    expect(isRaceStale({ ...fresh, winnerUid: 'a' }, now, { idleOnly: true })).toBe(false);
+    expect(isRaceStale({ ...fresh, lastActivityAt: now - DASH_STALE_MS - 1 }, now, { idleOnly: true })).toBe(true);
+  });
+
+  it('treats a missing race as stale', () => {
+    expect(isRaceStale(null, now)).toBe(true);
   });
 });
