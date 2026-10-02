@@ -21,6 +21,14 @@
         "winnerUid": {
           ".write": "auth != null && !data.exists() && newData.val() === auth.uid && root.child('dashRaces/' + $code + '/status').val() === 'active' && root.child('dashRaces/' + $code + '/players/' + auth.uid + '/finished').val() === true"
         },
+        "settings": {
+          "trackLength": {
+            ".validate": "newData.val() === 15 || newData.val() === 25 || newData.val() === 40"
+          },
+          "wrongStepBack": {
+            ".validate": "newData.val() === 1 || newData.val() === 2"
+          }
+        },
         "players": {
           "$uid": {
             ".write": "auth != null && auth.uid === $uid && (!newData.exists() || data.exists() || (root.child('dashRaces/' + $code + '/status').val() === 'waiting'))",
@@ -28,7 +36,7 @@
               ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
             },
             "position": {
-              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 25"
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 40"
             },
             "correctCount": {
               ".validate": "newData.isNumber() && newData.val() >= 0"

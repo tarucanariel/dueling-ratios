@@ -105,6 +105,23 @@
       </div>
     </div>
 
+    <div class="setup-step hidden" id="step-dash-length">
+      <label for="dash-length-select">Race length</label>
+      <select id="dash-length-select">
+        <option value="15">Short &mdash; 15 steps</option>
+        <option value="25" selected>Standard &mdash; 25 steps</option>
+        <option value="40">Long &mdash; 40 steps</option>
+      </select>
+    </div>
+
+    <div class="setup-step hidden" id="step-dash-penalty">
+      <label for="dash-penalty-select">When someone answers wrong</label>
+      <select id="dash-penalty-select">
+        <option value="2" selected>Back 2 steps</option>
+        <option value="1">Back 1 step</option>
+      </select>
+    </div>
+
     <div class="setup-step hidden" id="step-join-code">
       <label for="join-code-input">Room code</label>
       <input type="text" id="join-code-input" maxlength="4" placeholder="e.g. 7XQ2" autocomplete="off" class="code-input">
@@ -195,7 +212,7 @@
         <li><strong>Same Device</strong> — two players take turns on one screen.</li>
         <li><strong>vs Computer</strong> — take turns against a computer opponent on one screen. Choose Easy, Medium, or Hard — higher difficulties answer faster and make fewer mistakes.</li>
         <li><strong>Online</strong> — challenge someone on a different device using a shareable room code.</li>
-        <li><strong>&#127937; Ratio Dash</strong> — a race for 2 to 10 players. The host picks the operations and shares a 4-character code; everyone solves their own stream of fraction problems at the same time. Every correct number moves your avatar 1 step toward the finish line, but a wrong number sends it 2 steps back — so one mistake takes two correct answers to recover. The first avatar to take 25 steps forward wins.</li>
+        <li><strong>&#127937; Ratio Dash</strong> — a race for 2 to 10 players. The host picks the operations and shares a 4-character code; everyone solves their own stream of fraction problems at the same time. After a 3-2-1 countdown, every correct number moves your avatar 1 step toward the finish line, but a wrong number sends it back — 2 steps by default — so one mistake takes two correct answers to recover. The host can also set the race length (15, 25 or 40 steps) and the setback (1 or 2 steps). The first avatar to reach the finish line wins, and a badge beside the track shows your current place. If your tab closes mid-race, reopen the game within 10 minutes and tap Rejoin to get back on the track.</li>
       </ul>
 
       <h3>How to Solve a Problem</h3>
@@ -627,9 +644,21 @@
   <div class="dash-track-wrap hidden" id="dash-track-wrap">
     <div class="dash-track-header">
       <span class="dash-progress" id="dash-progress">0 / 25</span>
-      <button class="text-link-btn" id="dash-leave-btn" type="button">Leave race</button>
+      <span class="dash-rank hidden" id="dash-rank" aria-live="polite"></span>
+      <button class="dash-leave-icon-btn" id="dash-leave-btn" type="button" title="Leave race" aria-label="Leave race">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <path d="M16 17l5-5-5-5"/>
+          <path d="M21 12H9"/>
+        </svg>
+      </button>
     </div>
     <div class="dash-track" id="dash-track"></div>
+  </div>
+
+  <div class="dash-countdown hidden" id="dash-countdown" aria-live="assertive">
+    <div class="dash-countdown-label">Get ready&hellip;</div>
+    <div class="dash-countdown-num" id="dash-countdown-num">3</div>
   </div>
 
   <main class="board-area">
@@ -654,6 +683,7 @@
     <p class="subtitle">Share this code so others can join:</p>
     <div class="room-code-display" id="dash-room-code">----</div>
     <div class="dash-banner" id="dash-banner"></div>
+    <p class="dash-lobby-rules" id="dash-lobby-rules"></p>
     <div class="dash-lobby-slots" id="dash-lobby-slots"></div>
     <p class="subtitle" id="dash-lobby-status"></p>
     <button class="primary-btn hidden" id="dash-start-btn" type="button">Start Race</button>

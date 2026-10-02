@@ -23,7 +23,7 @@
 
 import { ref, set, get, update, remove, onValue, off, onDisconnect, serverTimestamp, runTransaction } from "firebase/database";
 import { db, auth, ensureSignedIn } from "./firebase.js";
-import { DASH_MAX_PLAYERS, DASH_TRACK_LENGTH } from "./dashLogic.js";
+import { DASH_MAX_PLAYERS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, isRaceOver } from "./dashLogic.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I, same as online.js
 export const DASH_CODE_LENGTH = 4;
@@ -80,7 +80,8 @@ async function pruneStaleRaces(){
   } catch (err){ /* best-effort */ }
 }
 
-/* settings: { allowedOps, allowNegatives } */
+/* settings: { allowedOps, allowNegatives, trackLength, wrongStepBack } — the
+   last two default to 25 and 2. */
 export async function createRace(hostName, settings){
   const uid = await currentUid();
   pruneStaleRaces();
@@ -99,7 +100,7 @@ export async function createRace(hostName, settings){
     status: "waiting",
     startedAt: null,
     winnerUid: null,
-    settings: { ...settings, trackLength: DASH_TRACK_LENGTH },
+    settings: { trackLength: DASH_TRACK_LENGTH, wrongStepBack: DASH_WRONG_STEP_BACK, ...settings },
     players: { [uid]: buildPlayerEntry(uid, hostName) },
   });
   return { code, uid };
@@ -198,17 +199,33 @@ export async function leaveRace(code, uid, { isHost, status, raceOver }){
   }
 }
 
+/* Validates a saved seat and, if the player can still get back into the
+   race, returns what enterDash needs. Only an active, unfinished race
+   whose player entry still exists can be rejoined — a lobby drops
+   disconnected players, and a finished race has nothing to rejoin. */
+export async function rejoinRace(code){
+  const uid = await currentUid();
+  const snap = await get(raceRef(code));
+  if(!snap.exists()) return { ok: false, message: "That race is no longer available." };
+  const race = snap.val();
+  if(isRaceOver(race)) return { ok: false, message: "That race has already finished." };
+  if(race.status !== "active" || !race.players?.[uid]){
+    return { ok: false, message: "That race is no longer available." };
+  }
+  return { ok: true, code, uid, isHost: race.hostUid === uid };
+}
+
 /* Presence. While the race is still in the lobby, a dropped connection
    removes the player (or, for the host, the whole room — a lobby with
    no host can never start). Once the race is active it only flips
    connected:false, so the avatar stays on the track marked as "left".
    Call markStarted() when the race goes active. Returns
    { markStarted, stop }. */
-export function trackDashPresence(code, uid, isHost){
+export function trackDashPresence(code, uid, isHost, { started: alreadyStarted = false } = {}){
   const connectedRef = ref(db, ".info/connected");
   const entry = playerRef(code, uid);
   const lobbyTarget = isHost ? raceRef(code) : entry;
-  let started = false;
+  let started = alreadyStarted; // true when rejoining a race that is already underway
 
   const arm = async () => {
     if(started){

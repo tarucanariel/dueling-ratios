@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextPosition, sortStandings, hasPlayerLeft, isRaceOver, DASH_TRACK_LENGTH } from './dashLogic.js';
+import { nextPosition, sortStandings, hasPlayerLeft, isRaceOver, rankOf, ordinal, DASH_TRACK_LENGTH } from './dashLogic.js';
 
 describe('nextPosition', () => {
   it('moves one step forward on a correct answer', () => {
@@ -66,5 +66,49 @@ describe('isRaceOver', () => {
     expect(isRaceOver({ status: 'active', winnerUid: 'a' })).toBe(true);
     expect(isRaceOver({ status: 'active' })).toBe(false);
     expect(isRaceOver(null)).toBe(false);
+  });
+});
+
+describe('nextPosition with host settings', () => {
+  it('uses the chosen setback', () => {
+    expect(nextPosition(10, false, 25, 1)).toBe(9);
+    expect(nextPosition(10, false, 25, 2)).toBe(8);
+    expect(nextPosition(0, false, 25, 1)).toBe(0);
+  });
+
+  it('caps at the chosen track length', () => {
+    expect(nextPosition(14, true, 15)).toBe(15);
+    expect(nextPosition(15, true, 15)).toBe(15);
+    expect(nextPosition(24, true, 40)).toBe(25);
+  });
+});
+
+describe('rankOf', () => {
+  const players = {
+    a: { uid: 'a', position: 10 },
+    b: { uid: 'b', position: 7 },
+    c: { uid: 'c', position: 7 },
+    d: { uid: 'd', position: 0 },
+  };
+
+  it('ranks by how many racers are strictly ahead', () => {
+    expect(rankOf(players, 'a')).toEqual({ rank: 1, tied: false, of: 4 });
+    expect(rankOf(players, 'd')).toEqual({ rank: 4, tied: false, of: 4 });
+  });
+
+  it('gives tied racers the same rank and flags the tie', () => {
+    expect(rankOf(players, 'b')).toEqual({ rank: 2, tied: true, of: 4 });
+    expect(rankOf(players, 'c')).toEqual({ rank: 2, tied: true, of: 4 });
+  });
+
+  it('has no rank before anyone has moved, or for an unknown player', () => {
+    expect(rankOf({ a: { uid: 'a', position: 0 }, b: { uid: 'b', position: 0 } }, 'a')).toBeNull();
+    expect(rankOf(players, 'zzz')).toBeNull();
+  });
+});
+
+describe('ordinal', () => {
+  it('formats ordinals, including the teens', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd']);
   });
 });

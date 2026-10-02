@@ -10,10 +10,10 @@ import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './
 import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
 import { isResultTie } from './results.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
-import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
-import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, DASH_TRACK_LENGTH, nextPosition, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
+import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, rejoinRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
+import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
 import { avatarUrlForPlayer } from './dashAvatar.js';
-import { playDashCorrect, playDashWrong, startDashMusic, stopDashMusic } from './dashAudio.js';
+import { playDashCorrect, playDashWrong, playDashCountdownTick, startDashMusic, stopDashMusic } from './dashAudio.js';
 
 /* =========================================================
    AAT's Dueling Ratios — app logic
@@ -109,6 +109,14 @@ const el = {
   stepDashChoice: document.getElementById('step-dash-choice'),
   dashHostBtn: document.getElementById('dash-host-btn'),
   dashJoinBtn: document.getElementById('dash-join-btn'),
+  stepDashLength: document.getElementById('step-dash-length'),
+  stepDashPenalty: document.getElementById('step-dash-penalty'),
+  dashLengthSelect: document.getElementById('dash-length-select'),
+  dashPenaltySelect: document.getElementById('dash-penalty-select'),
+  dashRank: document.getElementById('dash-rank'),
+  dashCountdown: document.getElementById('dash-countdown'),
+  dashCountdownNum: document.getElementById('dash-countdown-num'),
+  dashLobbyRules: document.getElementById('dash-lobby-rules'),
   dashTrackWrap: document.getElementById('dash-track-wrap'),
   dashTrack: document.getElementById('dash-track'),
   dashProgress: document.getElementById('dash-progress'),
@@ -329,9 +337,10 @@ const el = {
    ========================================================= */
 const SEAT_STORAGE_KEY = 'duelingRatiosSeat';
 
-function saveSeat(code, role, name){
+function saveSeat(code, role, name, kind){
   try{
-    localStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ code, role, name, savedAt: Date.now() }));
+    // kind is 'dash' for a Ratio Dash race; absent for a 1v1 online room.
+    localStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ code, role, name, kind, savedAt: Date.now() }));
   } catch(e) { /* storage unavailable (private browsing etc.) — rejoin just won't be offered */ }
 }
 
@@ -1946,12 +1955,14 @@ function updateStepVisibility(){
   // them; online only shows them once "Create Game" is chosen (a guest —
   // whether joining by code or by challenging from the lobby — inherits
   // whatever the host picked, so they don't choose anything).
-  // Ratio Dash hosts pick operations/negatives only — a race has a fixed
-  // length (25 steps) and no timer or pair count.
+  // Ratio Dash hosts pick operations, negatives, race length and the
+  // wrong-answer setback — a race has no timer or pair count.
   const showHostSettings = (mode === 'solo' || mode === 'vs' || mode === 'computer') || (mode === 'online' && onlineChoice === 'create');
   const showDashSettings = mode === 'dash' && dashChoice === 'host';
   el.stepOperations.classList.toggle('hidden', !(showHostSettings || showDashSettings));
   el.stepNegatives.classList.toggle('hidden', !(showHostSettings || showDashSettings));
+  el.stepDashLength.classList.toggle('hidden', !showDashSettings);
+  el.stepDashPenalty.classList.toggle('hidden', !showDashSettings);
   el.stepPairCount.classList.toggle('hidden', !showHostSettings);
   el.stepTimeControl.classList.toggle('hidden', !showHostSettings);
 
@@ -2488,13 +2499,19 @@ function checkForRejoinableSeat(){
     return;
   }
 
-  el.rejoinBannerText.textContent = `You have an unfinished game in room ${seat.code} as ${seat.name}. Rejoin where you left off?`;
+  el.rejoinBannerText.textContent = seat.kind === 'dash'
+    ? `You have an unfinished Ratio Dash race (code ${seat.code}) as ${seat.name}. Rejoin the race?`
+    : `You have an unfinished game in room ${seat.code} as ${seat.name}. Rejoin where you left off?`;
   el.rejoinBanner.classList.remove('hidden');
 }
 
 async function attemptRejoin(){
   const seat = loadSeat();
   if(!seat) return;
+  if(seat.kind === 'dash'){
+    attemptDashRejoin(seat);
+    return;
+  }
 
   el.rejoinBtn.disabled = true;
   try{
@@ -5212,7 +5229,7 @@ function showWinner(){
    normal board/tile pool (state.mode === 'dash'); the only thing shared
    is each player's track position. A correct tile moves the avatar 1
    step forward, a wrong tile 2 steps back, and the first avatar to reach
-   DASH_TRACK_LENGTH wins. Stats, badges and spectating are intentionally
+   the race's track length wins. Stats, badges and spectating are intentionally
    not wired up for this mode.
 
    All live race data hangs off state.dash (null outside a race), so the
@@ -5253,7 +5270,12 @@ async function handleDashHost(){
   el.startBtn.disabled = true;
   el.setupError.textContent = '';
   try{
-    const { code, uid } = await createRace(name, { allowedOps: selectedOps, allowNegatives: el.allowNegatives.checked });
+    const { code, uid } = await createRace(name, {
+      allowedOps: selectedOps,
+      allowNegatives: el.allowNegatives.checked,
+      trackLength: parseInt(el.dashLengthSelect.value, 10),
+      wrongStepBack: parseInt(el.dashPenaltySelect.value, 10),
+    });
     enterDash(code, uid, true);
   } catch (err){
     el.setupError.textContent = 'Could not create a race. Please try again.';
@@ -5292,7 +5314,7 @@ async function handleDashJoin(){
   }
 }
 
-function enterDash(code, uid, isHost){
+function enterDash(code, uid, isHost, { rejoin = false } = {}){
   cleanupDash();
   state.mode = 'dash';
   const d = state.dash = {
@@ -5309,7 +5331,14 @@ function enterDash(code, uid, isHost){
     waitTimer: null,
     resultsTimer: null,
     unsub: null,
-    presence: trackDashPresence(code, uid, isHost),
+    presence: trackDashPresence(code, uid, isHost, { started: rejoin }),
+    trackLength: DASH_TRACK_LENGTH,        // the real values come from the race's settings
+    wrongStepBack: DASH_WRONG_STEP_BACK,   // when the race UI starts (startDashRaceUI)
+    began: false,        // countdown finished and problems are live
+    countdownTimer: null,
+    lastCount: null,
+    lastRank: null,
+    seatSavedAt: 0,
     bots: isHost && DASH_DEV_BOTS ? createDashBots() : null, // dev-only, see DASH_DEV_BOTS
     botTimer: null,
     botWinnerUid: null,
@@ -5318,8 +5347,33 @@ function enterDash(code, uid, isHost){
 
   el.setupModal.classList.add('hidden');
   el.dashRoomCode.textContent = code;
-  el.dashLobbyModal.classList.remove('hidden');
+  // A rejoining player goes straight back to the track, not the lobby.
+  if(!rejoin) el.dashLobbyModal.classList.remove('hidden');
   d.unsub = listenToRace(code, onDashUpdate);
+}
+
+/* Reconnect: a player whose tab closed or reloaded mid-race gets their
+   avatar back — same position and counts, since those live in the
+   database — via the shared "Rejoin" banner (see checkForRejoinableSeat). */
+async function attemptDashRejoin(seat){
+  el.rejoinBtn.disabled = true;
+  try{
+    const result = await rejoinRace(seat.code);
+    if(!result.ok){
+      clearSeat();
+      el.rejoinBanner.classList.add('hidden');
+      el.setupError.textContent = result.message;
+      return;
+    }
+    el.rejoinBanner.classList.add('hidden');
+    state.mode = 'dash';
+    enterDash(result.code, result.uid, result.isHost, { rejoin: true });
+  } catch (err){
+    console.error('Ratio Dash rejoin failed:', err);
+    el.setupError.textContent = 'Could not rejoin that race. Please try again.';
+  } finally {
+    el.rejoinBtn.disabled = false;
+  }
 }
 
 function clearDashWaitTimer(){
@@ -5335,7 +5389,8 @@ function clearDashWaitTimer(){
 function cleanupDash(){
   const d = state.dash;
   stopDashMusic();
-  el.gameScreen.classList.remove('dash-mode');
+  el.gameScreen.classList.remove('dash-mode', 'dash-counting');
+  el.dashCountdown.classList.add('hidden');
   el.dashTrackWrap.classList.add('hidden');
   el.dashLobbyModal.classList.add('hidden');
   el.dashResultsModal.classList.add('hidden');
@@ -5343,6 +5398,7 @@ function cleanupDash(){
   clearDashWaitTimer();
   if(d.resultsTimer) clearTimeout(d.resultsTimer);
   if(d.botTimer) clearInterval(d.botTimer);
+  if(d.countdownTimer) clearTimeout(d.countdownTimer);
   if(d.unsub) d.unsub();
   d.presence.stop();
   state.dash = null;
@@ -5423,10 +5479,10 @@ function startDashBots(){
     Object.values(d.bots).forEach((bot) => {
       if(bot.finished || now < bot.nextMoveAt) return;
       const correct = Math.random() < 0.8;
-      bot.position = nextPosition(bot.position, correct);
+      bot.position = nextPosition(bot.position, correct, d.trackLength, d.wrongStepBack);
       if(correct) bot.correctCount++; else bot.wrongCount++;
       bot.nextMoveAt = now + 900 + Math.random() * 2600;
-      if(bot.position >= DASH_TRACK_LENGTH){
+      if(bot.position >= d.trackLength){
         bot.finished = true;
         if(!d.botWinnerUid) d.botWinnerUid = bot.uid;
       }
@@ -5450,6 +5506,14 @@ function onDashUpdate(rawRace){
     return;
   }
   d.race = race;
+
+  // While racing, keep the saved seat's timestamp current so "last
+  // confirmed connected" is accurate for the 10-minute rejoin window.
+  if(d.started && !isRaceOver(race) && Date.now() - d.seatSavedAt > 5000){
+    d.seatSavedAt = Date.now();
+    const me = race.players && race.players[d.uid];
+    saveSeat(d.code, 'dash', me ? me.name : '', 'dash');
+  }
 
   if(isRaceOver(race)){
     handleDashRaceEnd(race);
@@ -5501,6 +5565,10 @@ function renderDashLobby(race){
     el.dashLobbySlots.appendChild(slot);
   }
 
+  const steps = (race.settings && race.settings.trackLength) || DASH_TRACK_LENGTH;
+  const back = (race.settings && race.settings.wrongStepBack) || DASH_WRONG_STEP_BACK;
+  el.dashLobbyRules.textContent = `${steps} steps to the finish \u00B7 a wrong answer sends you back ${back} step${back === 1 ? '' : 's'}`;
+
   const joined = `${players.length}/${DASH_MAX_PLAYERS} players joined`;
   const enough = players.length >= DASH_MIN_PLAYERS;
   el.dashBanner.innerHTML = '<span class="dash-pulse-dot"></span><span></span>';
@@ -5530,6 +5598,14 @@ function startDashRaceUI(race){
   d.presence.markStarted();
 
   const me = race.players[d.uid];
+  d.trackLength = race.settings.trackLength || DASH_TRACK_LENGTH;
+  d.wrongStepBack = race.settings.wrongStepBack || DASH_WRONG_STEP_BACK;
+  // Progress lives in the database, so a rejoining player resumes where
+  // they were (for a fresh race these are all zero).
+  d.position = (me && me.position) || 0;
+  d.correctCount = (me && me.correctCount) || 0;
+  d.wrongCount = (me && me.wrongCount) || 0;
+  d.finishing = !!(me && me.finished);
   state.allowedOps = race.settings.allowedOps;
   state.allowNegatives = !!race.settings.allowNegatives;
   state.timeControlSeconds = 0;
@@ -5545,19 +5621,100 @@ function startDashRaceUI(race){
   el.gameScreen.classList.remove('hidden');
   el.gameScreen.classList.add('dash-mode');
   el.dashTrackWrap.classList.remove('hidden');
-  el.dashProgress.textContent = `0 / ${DASH_TRACK_LENGTH}`;
+  el.dashProgress.textContent = `${d.position} / ${d.trackLength}`;
   buildDashTrack(race);
+  updateDashRank(race);
 
+  // Everyone's countdown ends at the same server-time moment (startedAt
+  // + 3s). Someone arriving after that — a slow device, or a rejoin —
+  // skips straight into the race.
+  const startedAt = typeof race.startedAt === 'number' ? race.startedAt : serverNow();
+  runDashCountdown(startedAt + DASH_COUNTDOWN_MS);
+}
+
+/* 3-2-1 on the pinned track screen. The problem stays hidden meanwhile so
+   nobody gets a head start. Polls the (server-synced) clock rather than
+   chaining one-second timeouts, so a throttled tab can't drift. */
+function runDashCountdown(goAt){
+  const d = state.dash;
+  const tick = () => {
+    if(state.dash !== d || d.ending) return;
+    const remaining = Math.min(goAt - serverNow(), DASH_COUNTDOWN_MS);
+    if(remaining <= 0){
+      d.countdownTimer = null;
+      beginDashRace(true);
+      return;
+    }
+    const count = Math.ceil(remaining / 1000);
+    if(count !== d.lastCount){
+      d.lastCount = count;
+      showDashCountdownNumber(count);
+    }
+    d.countdownTimer = setTimeout(tick, 100);
+  };
+
+  if(goAt - serverNow() <= 0){
+    beginDashRace(false);
+    return;
+  }
+  el.gameScreen.classList.add('dash-counting');
+  el.dashCountdown.classList.remove('hidden');
+  tick();
+}
+
+/* Countdown finished: reveal the first problem and start racing. */
+function beginDashRace(fromCountdown){
+  const d = state.dash;
+  d.began = true;
+  el.gameScreen.classList.remove('dash-counting');
+  el.dashCountdown.classList.add('hidden');
+  if(d.race) sizeDashTrack(Object.keys(d.race.players).length);
+  if(fromCountdown){
+    playDashCountdownTick(true);
+    el.feedbackLine.textContent = 'Go!';
+    el.feedbackLine.className = 'feedback-line good';
+  }
   announceGameStart(activeTileEffectId());
   startDashMusic();
   startNextPair();
   if(d.bots) startDashBots();
 }
 
+function showDashCountdownNumber(count){
+  el.dashCountdownNum.textContent = String(count);
+  el.dashCountdownNum.style.animation = 'none';
+  void el.dashCountdownNum.offsetWidth; // restart the pop animation for each number
+  el.dashCountdownNum.style.animation = '';
+  playDashCountdownTick(false);
+}
+
+/* The live place badge beside the progress text: "1st", "T-2nd" when tied.
+   Hidden until someone has moved (before that there is no order). Pops
+   when the player moves up. */
+function updateDashRank(race){
+  const d = state.dash;
+  const info = rankOf(race.players, d.uid);
+  if(!info){
+    el.dashRank.classList.add('hidden');
+    d.lastRank = null;
+    return;
+  }
+  el.dashRank.classList.remove('hidden');
+  el.dashRank.textContent = `${info.tied ? 'T-' : ''}${ordinal(info.rank)} of ${info.of}`;
+  el.dashRank.classList.remove('rank-1', 'rank-2', 'rank-3');
+  if(info.rank <= 3) el.dashRank.classList.add(`rank-${info.rank}`);
+  if(d.lastRank !== null && info.rank < d.lastRank){
+    el.dashRank.classList.remove('rank-up');
+    void el.dashRank.offsetWidth;
+    el.dashRank.classList.add('rank-up');
+  }
+  d.lastRank = info.rank;
+}
+
 /* Displayed position only — clamped a few percent in from each edge so an
    avatar at 0 or at the finish never clips the track's rounded ends. */
 function positionDashAvatar(avatarEl, position){
-  const pct = Math.min(1, Math.max(0, position / DASH_TRACK_LENGTH));
+  const pct = Math.min(1, Math.max(0, position / state.dash.trackLength));
   avatarEl.style.left = `${4 + pct * 92}%`;
 }
 
@@ -5576,7 +5733,8 @@ function sizeDashTrack(playerCount){
   // the .game-wrap.dash-mode .pool-sidebar rule); measure it now that the
   // track has its final size.
   const boardArea = el.gameScreen.querySelector('.board-area');
-  el.gameScreen.style.setProperty('--dash-board-h', `${boardArea.clientHeight}px`);
+  // (0 while the countdown hides the board — beginDashRace re-measures.)
+  if(boardArea.clientHeight > 0) el.gameScreen.style.setProperty('--dash-board-h', `${boardArea.clientHeight}px`);
 }
 
 window.addEventListener('resize', () => {
@@ -5654,12 +5812,13 @@ function syncDashTrack(race, { silent = false } = {}){
   });
 
   const me = race.players[d.uid];
-  if(me) el.dashProgress.textContent = `${me.position || 0} / ${DASH_TRACK_LENGTH}`;
+  if(me) el.dashProgress.textContent = `${me.position || 0} / ${d.trackLength}`;
+  updateDashRank(race);
 }
 
 function handleDashTileClick(tileId){
   const d = state.dash;
-  if(!d || !d.started || d.ending || d.finishing) return;
+  if(!d || !d.started || !d.began || d.ending || d.finishing) return;
   if(state.inputLocked) return;
   const tileIdx = state.pool.findIndex(t => t.id === tileId);
   if(tileIdx === -1) return;
@@ -5672,7 +5831,7 @@ function handleDashTileClick(tileId){
   const tileEl = el.poolTray.querySelector(`.tile-btn[data-tile-id="${tileId}"]`);
   const slotEls = document.querySelectorAll(`.cell-slot[data-cell-index="${state.cellIndex}"]`);
 
-  d.position = nextPosition(d.position, isCorrect);
+  d.position = nextPosition(d.position, isCorrect, d.trackLength, d.wrongStepBack);
 
   if(isCorrect){
     d.correctCount += 1;
@@ -5704,12 +5863,12 @@ function handleDashTileClick(tileId){
       slotEl.classList.add('drop-wrong');
       setTimeout(() => slotEl.classList.remove('drop-wrong'), 350);
     });
-    el.feedbackLine.textContent = 'Not quite. Back 2 steps!';
+    el.feedbackLine.textContent = `Not quite. Back ${d.wrongStepBack} step${d.wrongStepBack === 1 ? '' : 's'}!`;
     el.feedbackLine.className = 'feedback-line bad';
   }
 
   const progress = { position: d.position, correctCount: d.correctCount, wrongCount: d.wrongCount };
-  if(d.position >= DASH_TRACK_LENGTH){
+  if(d.position >= d.trackLength){
     // Crossed the line — input stays locked; the listener ends the race.
     d.finishing = true;
     el.feedbackLine.textContent = '\u{1F3C1} You crossed the finish line!';
@@ -5744,6 +5903,11 @@ function handleDashRaceEnd(race){
   d.ending = true;
   state.inputLocked = true;
   stopDashMusic();
+  clearSeat(); // nothing left to rejoin
+  if(d.countdownTimer){
+    clearTimeout(d.countdownTimer);
+    d.countdownTimer = null;
+  }
 
   if(d.started){
     syncDashTrack(race, { silent: true });
@@ -5801,7 +5965,7 @@ function renderDashResults(race){
 
     const progress = document.createElement('span');
     progress.className = 'dash-standing-progress';
-    progress.textContent = `${player.position || 0}/${DASH_TRACK_LENGTH}`;
+    progress.textContent = `${player.position || 0}/${(race.settings && race.settings.trackLength) || DASH_TRACK_LENGTH}`;
 
     row.append(rank, img, name, progress);
     el.dashStandings.appendChild(row);

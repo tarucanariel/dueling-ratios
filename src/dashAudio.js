@@ -114,3 +114,12 @@ function stopDashMusic() {
 }
 
 export { playDashCorrect, playDashWrong, startDashMusic, stopDashMusic };
+
+/* Countdown beeps: a short tick for 3-2-1 and a higher, longer one on Go. */
+function playDashCountdownTick(isGo = false) {
+    if (!getContext()) return;
+    const t = ctx.currentTime;
+    tone({ freq: isGo ? 1046.5 : 660, start: t, duration: isGo ? 0.45 : 0.14, type: "square", volume: isGo ? 0.09 : 0.06 });
+}
+
+export { playDashCountdownTick };

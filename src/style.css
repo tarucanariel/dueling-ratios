@@ -3154,3 +3154,90 @@ button:focus-visible, input:focus-visible{
   background:var(--secondary);
   border-radius:3px;
 }
+
+/* ----- Countdown, live rank, lobby rules ----- */
+.dash-lobby-rules{
+  font-size:0.82rem;
+  color:var(--chalk-dim);
+  margin:6px 0 0;
+}
+
+.dash-rank{
+  font-weight:700;
+  font-size:0.85rem;
+  padding:3px 10px;
+  border-radius:999px;
+  background:rgba(124,127,242,0.18);
+  border:1px solid var(--line);
+  color:var(--chalk);
+  transition:background 0.2s, color 0.2s, border-color 0.2s;
+}
+.dash-rank.rank-1{ background:rgba(240,163,85,0.2); border-color:var(--amber); color:var(--amber); }
+.dash-rank.rank-2, .dash-rank.rank-3{ background:rgba(0,255,136,0.1); border-color:rgba(0,255,136,0.35); color:var(--good); }
+.dash-rank.rank-up{ animation:dash-rank-pop 0.6s ease-out; }
+@keyframes dash-rank-pop{
+  0%{ transform:scale(1); }
+  40%{ transform:scale(1.25); }
+  100%{ transform:scale(1); }
+}
+.dash-track-header{ gap:10px; }
+.dash-track-header .dash-progress{ margin-right:auto; }
+
+/* While the 3-2-1 runs, the problem is kept hidden (so nobody gets a head
+   start) and the countdown fills the space below the track. */
+.game-wrap.dash-counting .board-area{ display:none; }
+.dash-countdown{
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  background:var(--slate-light);
+  border:1px solid var(--line);
+  border-radius:16px;
+}
+.dash-countdown-label{
+  font-size:1rem;
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  color:var(--chalk-dim);
+}
+.dash-countdown-num{
+  font-family:'Sora', 'Inter', sans-serif;
+  font-weight:800;
+  font-size:7rem;
+  line-height:1;
+  color:var(--amber);
+  animation:dash-count-pop 1s ease-out both;
+}
+@keyframes dash-count-pop{
+  0%{ transform:scale(1.7); opacity:0; }
+  25%{ transform:scale(1); opacity:1; }
+  80%{ opacity:1; }
+  100%{ transform:scale(0.85); opacity:0.5; }
+}
+@media (prefers-reduced-motion: reduce){
+  .dash-countdown-num, .dash-rank.rank-up{ animation:none; }
+}
+
+/* Icon-only "Leave race" button in the track header. */
+.dash-leave-icon-btn{
+  flex:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:32px;
+  height:32px;
+  padding:0;
+  border-radius:var(--radius);
+  border:1px solid var(--line);
+  background:rgba(255,51,102,0.08);
+  color:var(--bad);
+  cursor:pointer;
+  transition:background 0.15s, border-color 0.15s;
+}
+.dash-leave-icon-btn:hover{
+  background:rgba(255,51,102,0.18);
+  border-color:var(--bad);
+}
