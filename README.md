@@ -1,7 +1,27 @@
 # AAT's Dueling Ratios
 
 A fraction-arithmetic practice game for two students — solo play, same-device
-turn-taking, or online play across two different devices.
+turn-taking, or online play across two different devices — plus Ratio Dash
+(races for up to 10 players), printable worksheets, and a multiple-choice
+Practice Test on fractions, decimals and percents.
+
+## Practice Test
+
+A separate, self-contained mode (the "Practice Test" chip on the opening
+screen) for converting between fractions, decimals and percents. The student
+picks topics, 5/10/15 questions and Easy/Hard; each question is multiple
+choice with wrong options built from common mistakes (3/4 as 0.34, a shifted
+decimal point, an unreduced fraction, …). Results show score, accuracy, time,
+a per-topic breakdown and a review with explanations.
+
+- **No sign-in needed.** Signed-in players also get the result saved to
+  `playerStats/{uid}/practice` (kept out of the game-mode stats on purpose, so
+  practice never feeds the game's games-played / accuracy badges), four
+  Practice Test badges, a line in My Stats, and a Practice column in the
+  teacher's class roster. No new database rules were needed.
+- **Tests:** `src/practiceLogic.test.js` re-computes every generated answer
+  independently from the question text, so a wrong key can't slip through.
+- Not yet built: teacher-assigned tests.
 
 ## Local development
 
@@ -88,6 +108,8 @@ index.html          Vite entry point
 src/
   main.js           App wiring: setup screen, local play, online play, rendering
   logic.js          Pure fraction math + board-layout builders (no DOM, no state)
+  practiceLogic.js  Pure Practice Test question generation + scoring (no DOM)
+  practiceUI.js     Practice Test setup / quiz / results screens
   online.js         Firebase Realtime Database room create/join/sync
   firebase.js       Firebase init + anonymous auth
   style.css         All styling

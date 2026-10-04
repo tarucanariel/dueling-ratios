@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#7c7ff2">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Sora:wght@600;700;800&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&display=swap" rel="stylesheet">
 </head>
 <body>
 
@@ -26,6 +26,7 @@
       <button class="nav-chip" id="my-stats-btn" type="button"><span class="nav-chip-label">My Stats</span></button>
       <button class="nav-chip" id="my-classes-btn" type="button"><span class="nav-chip-label">My Classes</span></button>
       <button class="nav-chip" id="worksheet-btn" type="button"><span class="nav-chip-label">Worksheets</span></button>
+      <button class="nav-chip" id="practice-btn" type="button"><span class="nav-chip-label">Practice Test</span></button>
       <button class="nav-chip hidden" id="admin-btn" type="button"><span class="nav-chip-label">Admin</span></button>
     </div>
 
@@ -276,7 +277,7 @@
       <p>Typing a name is always enough to play — signing in with Google is entirely optional, and only unlocks a few extra things: your stats following your account across every device instead of just one browser, the ability to join or create a class, and cosmetic Tile Effects you can unlock and equip. Look for the "Sign in with Google" option next to the name field on the setup screen.</p>
 
       <h3>My Stats</h3>
-      <p>Available once you're signed in with Google. Shows how many games you've played and your accuracy, broken out separately for Solo, Same Device, vs Computer, and Online, plus a combined "All Modes" total. Its "My Badges" section shows every achievement badge you've earned so far (tap a badge, or hover it on a computer, to see its name and description) plus an "Up Next" progress bar toward whichever badge you're closest to earning in each badge family. Right below that, "Tile Effects" is where you equip whichever correct-answer animation you'd like to use — see below.</p>
+      <p>Available once you're signed in with Google. Shows how many games you've played and your accuracy, broken out separately for Solo, Same Device, vs Computer, and Online, plus a combined "All Modes" total, and — once you've taken one — a line with your Practice Test count and accuracy. Its "My Badges" section shows every achievement badge you've earned so far (tap a badge, or hover it on a computer, to see its name and description) plus an "Up Next" progress bar toward whichever badge you're closest to earning in each badge family. Right below that, "Tile Effects" is where you equip whichever correct-answer animation you'd like to use — see below.</p>
 
       <h3>Achievement Badges</h3>
       <p>Signed-in players can permanently unlock badges by hitting certain milestones. Earning one pops up its own gold celebration banner the moment it happens, in addition to showing up in My Stats afterward. Current badges:</p>
@@ -299,6 +300,11 @@
         <li><strong>✖️ Multiplication Master</strong> — 90%+ accuracy over at least 50 multiplication answers, lifetime.</li>
         <li><strong>➗ Division Dynamo</strong> — 90%+ accuracy over at least 50 division answers, lifetime.</li>
         <li><strong>🧠 Fraction Champion</strong> — Earn all four operation-mastery badges above.</li>
+        <li><strong>📝 First Test</strong> — Complete a Practice Test.</li>
+        <li><strong>📋 Test Taker</strong> — Complete 10 Practice Tests.</li>
+        <li><strong>⭐ Perfect Score</strong> — Get every question right on a Practice Test of 10 or more questions.</li>
+        <li><strong>🦎 Form Shifter</strong> — 80%+ accuracy over at least 20 answers in each of fractions, decimals and percents, across your Practice Tests.</li>
+        <li><strong>🥉 Podium Finish, 🥇 Race Winner, 👑 Dash Champion, 🔄 Comeback Kid and 💎 Clean Sprint</strong> — earned in Ratio Dash races; see Game Modes above.</li>
       </ul>
 
       <h3>Tile Effects</h3>
@@ -318,13 +324,18 @@
       <p>Whichever effect you have equipped also gives the board itself a matching ambient look for the rest of the game, not just the toss animation. In Same Device mode, only the account signed in on this device gets the custom effect on their turn — a same-device partner, or the computer in vs Computer mode, always sees the plain Classic Arc. A custom game-start sound (and, for Bankai and Gear 5, a full-screen announcement card too) works the same way — it's tied to whichever account is signed in on this device, not to turns, since it plays before anyone has had a turn yet.</p>
 
       <h3>My Classes</h3>
-      <p>Its own chip on the opening screen, once signed in with Google. A teacher (signed in with a school account) can create up to 5 classes, each with its own short join code to share — students who join with that code show up in a roster showing each student's games played and accuracy. A teacher can rename a class (pencil icon), remove an individual student from the roster (person icon, tap again to confirm), or delete a class entirely once it's no longer needed (trash icon), freeing up a slot for a new one. A student can only be in one class at a time; joining a new one replaces the last. If a student's class is ever deleted, or the teacher removes them from it, that's picked up automatically the next time they open My Classes.</p>
+      <p>Its own chip on the opening screen, once signed in with Google. A teacher (signed in with a school account) can create up to 5 classes, each with its own short join code to share — students who join with that code show up in a roster showing each student's games played and accuracy, plus how many Practice Tests they've taken and their accuracy on them. A teacher can rename a class (pencil icon), remove an individual student from the roster (person icon, tap again to confirm), or delete a class entirely once it's no longer needed (trash icon), freeing up a slot for a new one. A student can only be in one class at a time; joining a new one replaces the last. If a student's class is ever deleted, or the teacher removes them from it, that's picked up automatically the next time they open My Classes.</p>
 
       <h3>Watch Games</h3>
       <p>Lets a teacher (signed in with a school account) browse and spectate ongoing Online games in real time, without taking part.</p>
 
       <h3>Worksheets</h3>
       <p>Generates a printable practice sheet — the same kinds of problems as the game, laid out with blank boxes to fill in by hand, plus an answer key on the last page. Choose the operations, negatives, and how many problems (1–10), then print or save as a PDF straight from your browser's print dialog. No sign-in needed.</p>
+
+      <h3>Practice Test</h3>
+      <p>Fractions, decimals and percents are the same numbers written three ways, so this multiple-choice test practices moving between them. Open it from the "Practice Test" chip on the opening screen, then choose which topics to include (fractions, decimals, percents), how many questions (5, 10 or 15), and a difficulty — Easy sticks to friendly values like ½, ¼ and 10%, Hard uses trickier ones.</p>
+      <p>Questions include converting between forms (like ¾ to a decimal, or 0.35 to a fraction in lowest terms), finding a fraction, decimal or percent of a number, adding and subtracting numbers written in different forms, and picking the greatest or least of a mix. All the questions are on one scrolling page — answer them in any order and change an answer any time before you submit. Any unanswered question counts as wrong. There's a count-up timer, but no time limit.</p>
+      <p>When you submit, you get your score, accuracy, time and a result for each topic, plus a review of every question with the correct answer and a short explanation of why. No sign-in needed. If you're signed in with Google, your result is saved to My Stats and can earn Practice Test badges; your teacher also sees your number of tests and accuracy in the class roster. Practice Test answers are kept separate from game stats, so they never change your game badges.</p>
 
       <h3>Send Feedback</h3>
       <p>Once signed in with Google, look for the 💬 button in the bottom-right corner of the setup screen. Use it to send a comment, bug report, or suggestion straight to the developer — it only appears on the setup screen itself, not mid-game.</p>
@@ -451,6 +462,7 @@
         </tbody>
       </table>
       <p class="field-note hidden" id="my-stats-dash-line"></p>
+      <p class="field-note hidden" id="my-stats-practice-line"></p>
 
     </div>
 
@@ -586,6 +598,88 @@
     <p class="setup-error" id="ws-error"></p>
     <button class="primary-btn" id="ws-generate-btn" type="button">Generate &amp; Print</button>
     <button class="secondary-btn" id="ws-close-btn" type="button">Close</button>
+  </div>
+</div>
+
+<!-- Practice Test — multiple-choice questions on fractions, decimals and
+     percents. Three views (setup / quiz / results) share one modal; see
+     practiceUI.js. Works without sign-in. -->
+<div class="modal-overlay hidden" id="practice-modal">
+  <div class="modal chalk-panel pt-panel">
+
+    <div id="pt-setup">
+      <h2 class="game-title" style="font-size:1.6rem;">Practice Test</h2>
+      <p class="subtitle">Fractions, decimals and percents &mdash; they&rsquo;re the same numbers in different clothes.</p>
+
+      <div class="setup-step">
+        <label>Which topics?</label>
+        <div class="checkbox-grid pt-topic-grid">
+          <label class="checkbox-item">
+            <input type="checkbox" class="pt-topic-choice" data-topic="fraction" checked>
+            Fractions
+          </label>
+          <label class="checkbox-item">
+            <input type="checkbox" class="pt-topic-choice" data-topic="decimal" checked>
+            Decimals
+          </label>
+          <label class="checkbox-item">
+            <input type="checkbox" class="pt-topic-choice" data-topic="percent" checked>
+            Percents
+          </label>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <label>How many questions?</label>
+        <div class="choice-row choice-row-3" id="pt-count-row">
+          <button class="choice-btn" type="button" data-count="5">5</button>
+          <button class="choice-btn selected" type="button" data-count="10">10</button>
+          <button class="choice-btn" type="button" data-count="15">15</button>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <label>Difficulty</label>
+        <div class="choice-row choice-row-3" id="pt-difficulty-row">
+          <button class="choice-btn selected" type="button" data-difficulty="easy">Easy</button>
+          <button class="choice-btn" type="button" data-difficulty="hard">Hard</button>
+        </div>
+        <p class="field-note">Easy sticks to friendly values like &frac12;, &frac14; and 10%. Hard uses trickier ones.</p>
+      </div>
+
+      <p class="setup-error" id="pt-error"></p>
+      <button class="primary-btn" id="pt-start-btn" type="button">Start Test</button>
+      <button class="secondary-btn" id="pt-close-btn" type="button">Close</button>
+    </div>
+
+    <div id="pt-quiz" class="hidden">
+      <div class="pt-quiz-top">
+        <span class="pt-progress" id="pt-progress"></span>
+        <span class="pt-timer" id="pt-timer">00:00</span>
+      </div>
+      <div class="pt-question-list" id="pt-question-list"></div>
+      <p class="setup-error" id="pt-quiz-error"></p>
+      <button class="primary-btn" id="pt-submit-btn" type="button">Submit</button>
+      <button class="secondary-btn pt-quit-btn" id="pt-quit-btn" type="button">Quit test</button>
+    </div>
+
+    <div id="pt-results" class="hidden">
+      <h2 class="game-title" style="font-size:1.6rem;">Results</h2>
+      <p class="pt-verdict" id="pt-verdict"></p>
+      <p class="field-note pt-save-note" id="pt-save-note"></p>
+      <div class="pt-stats">
+        <div class="pt-stat"><span class="pt-stat-value" id="pt-score"></span><span class="pt-stat-label">Score</span></div>
+        <div class="pt-stat"><span class="pt-stat-value" id="pt-accuracy"></span><span class="pt-stat-label">Accuracy</span></div>
+        <div class="pt-stat"><span class="pt-stat-value" id="pt-time"></span><span class="pt-stat-label">Time</span></div>
+      </div>
+      <div class="pt-topic-breakdown" id="pt-breakdown"></div>
+      <h3 class="pt-review-heading">Review</h3>
+      <div class="pt-review" id="pt-review"></div>
+      <button class="primary-btn" id="pt-again-btn" type="button">Try Another</button>
+      <button class="secondary-btn" id="pt-change-btn" type="button">Change Settings</button>
+      <button class="secondary-btn" id="pt-done-btn" type="button">Close</button>
+    </div>
+
   </div>
 </div>
 

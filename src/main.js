@@ -3,8 +3,8 @@ import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, FORFEIT_AFTER_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
-import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
-import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkDashBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
+import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, recordPracticeResult, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
+import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkDashBadges, checkPracticeBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './sounds.js';
 import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
@@ -13,6 +13,7 @@ import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, listenToAllRaces, pruneStaleRaces, rejoinRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
 import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, humanCount, isCompetitiveRace, isRaceStale, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
 import { avatarUrlForPlayer } from './dashAvatar.js';
+import { initPracticeUI, closePracticeTest } from './practiceUI.js';
 import { playDashCorrect, playDashWrong, playDashCountdownTick, startDashMusic, stopDashMusic } from './dashAudio.js';
 
 /* =========================================================
@@ -284,6 +285,7 @@ const el = {
   myStatsDashGames: document.getElementById('my-stats-dash-games'),
   myStatsDashAccuracy: document.getElementById('my-stats-dash-accuracy'),
   myStatsDashLine: document.getElementById('my-stats-dash-line'),
+  myStatsPracticeLine: document.getElementById('my-stats-practice-line'),
   myClassesBtn: document.getElementById('my-classes-btn'),
   myClassesModal: document.getElementById('my-classes-modal'),
   myClassesSignedOut: document.getElementById('my-classes-signed-out'),
@@ -619,7 +621,10 @@ function sumAllModes(stats){
    those describe a single just-finished game, not a running total,
    and aren't meaningful here. */
 async function checkAndAwardCatchUpBadges(stats){
-  const newlyEarned = checkGameEndBadges(stats, state.myBadges, 0, 0, false);
+  const newlyEarned = [
+    ...checkGameEndBadges(stats, state.myBadges, 0, 0, false),
+    ...checkPracticeBadges(stats, state.myBadges),
+  ];
   if(newlyEarned.length > 0) await awardAndCelebrateBadges(newlyEarned);
 }
 
@@ -666,6 +671,9 @@ async function openMyStats(){
     el.myStatsDashGames.textContent = dash.games;
     el.myStatsDashAccuracy.textContent = dash.accuracy;
     el.myStatsDashLine.classList.toggle('hidden', stats.dash.gamesPlayed === 0);
+    const pr = stats.practice;
+    el.myStatsPracticeLine.classList.toggle('hidden', pr.testsTaken === 0);
+    el.myStatsPracticeLine.textContent = `Practice Tests: ${pr.testsTaken} taken · ${pr.totalCount ? Math.round((pr.correctCount / pr.totalCount) * 100) + '% accuracy' : 'N/A'}`;
     el.myStatsDashLine.textContent = `Ratio Dash: ${stats.dash.wins} win${stats.dash.wins === 1 ? '' : 's'} \u00B7 ${stats.dash.podiums} podium${stats.dash.podiums === 1 ? '' : 's'}`;
   } catch(err){
     el.myStatsError.textContent = 'Could not load your stats. Please try again.';
@@ -1063,7 +1071,7 @@ async function renderClassCard(cls){
 
   const table = document.createElement('table');
   table.className = 'stats-table';
-  table.innerHTML = '<thead><tr><th>Student</th><th>Games</th><th>Accuracy</th><th></th></tr></thead><tbody></tbody>';
+  table.innerHTML = '<thead><tr><th>Student</th><th>Games</th><th>Accuracy</th><th>Practice</th><th></th></tr></thead><tbody></tbody>';
   const tbody = table.querySelector('tbody');
   card.appendChild(table);
 
@@ -1080,7 +1088,9 @@ async function renderClassCard(cls){
       try{
         const stats = await getPlayerStats(student.uid);
         const total = sumAllModes(stats);
-        return { uid: student.uid, name: student.name, games: total.games, accuracy: total.accuracy };
+        const pr = stats.practice;
+        const practice = pr.testsTaken === 0 ? '—' : `${pr.testsTaken} · ${Math.round((pr.correctCount / pr.totalCount) * 100)}%`;
+        return { uid: student.uid, name: student.name, games: total.games, accuracy: total.accuracy, practice };
       } catch(err){
         console.error(`Failed to load stats for roster student ${student.uid}:`, err);
         return { uid: student.uid, name: student.name, games: '\u2014', accuracy: '\u2014' };
@@ -1094,6 +1104,8 @@ async function renderClassCard(cls){
       gamesTd.textContent = row.games;
       const accTd = document.createElement('td');
       accTd.textContent = row.accuracy;
+      const practiceTd = document.createElement('td');
+      practiceTd.textContent = row.practice;
 
       const removeTd = document.createElement('td');
       removeTd.className = 'class-roster-remove-cell';
@@ -1140,7 +1152,7 @@ async function renderClassCard(cls){
       cancelBtn.addEventListener('click', resetRemoveBtn);
       removeTd.append(removeBtn, cancelBtn);
 
-      tr.append(nameTd, gamesTd, accTd, removeTd);
+      tr.append(nameTd, gamesTd, accTd, practiceTd, removeTd);
       tbody.appendChild(tr);
     });
   }
@@ -1364,6 +1376,33 @@ el.worksheetModal.addEventListener('click', (e) => {
   if(e.target === el.worksheetModal) el.worksheetModal.classList.add('hidden');
 });
 el.wsGenerateBtn.addEventListener('click', handleGenerateWorksheet);
+
+/* Saves a finished Practice Test for signed-in players and checks the
+   practice badges. Guests can take the test but nothing is stored.
+   Returns 'saved' | 'failed' | 'guest' for the results screen's note. */
+async function recordPracticeStats(result){
+  if(!state.googleUser) return 'guest';
+  const uid = state.googleUser.uid;
+  try{
+    await recordPracticeResult(uid, result);
+  } catch(err){
+    console.error('Failed to record Practice Test result:', err);
+    return 'failed';
+  }
+  // The result is saved; a failure past this point only costs a badge check.
+  try{
+    const freshStats = await getPlayerStats(uid);
+    state.myBadges = new Set(Object.keys(freshStats.badges || {}));
+    state.myStats = freshStats;
+    const newlyEarned = checkPracticeBadges(freshStats, state.myBadges, { correct: result.correct, total: result.total });
+    await awardAndCelebrateBadges(newlyEarned);
+  } catch(err){
+    console.error('Failed to check practice badges:', err);
+  }
+  return 'saved';
+}
+
+initPracticeUI({ onComplete: recordPracticeStats });
 
 /* =========================================================
    Setup screen wiring
@@ -2094,6 +2133,7 @@ function resetToSetup(){
   el.myStatsModal.classList.add('hidden');
   el.myClassesModal.classList.add('hidden');
   el.worksheetModal.classList.add('hidden');
+  closePracticeTest();
   state.missLog = [];
   state.opTally = {};
   state.rematchFinalizing = false;
