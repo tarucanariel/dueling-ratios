@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkGameEndBadges, checkDashBadges, checkStreakBadge, getNextBadgeProgress, BADGE_DEFS, BADGE_DEFS_BY_ID } from './badges.js';
+import { checkGameEndBadges, checkDashBadges, checkPracticeBadges, checkStreakBadge, getNextBadgeProgress, BADGE_DEFS, BADGE_DEFS_BY_ID } from './badges.js';
 
 // A blank stats object matching what getPlayerStats() in firebase.js
 // returns — every mode present, all zeros, plus an empty opStats. Tests
@@ -312,5 +312,80 @@ describe('Ratio Dash progress bar', () => {
     const entry = getNextBadgeProgress(stats, new Set(['dash-first-win'])).find((e) => e.id === 'dash-wins-5');
     expect(entry.percent).toBe(40);
     expect(entry.caption).toBe('2 / 5 Ratio Dash wins');
+  });
+});
+
+function practiceStats(overrides = {}){
+  const topic = () => ({ correctCount: 0, totalCount: 0 });
+  return {
+    ...blankStats(),
+    practice: {
+      testsTaken: 0, perfectTests: 0, correctCount: 0, totalCount: 0,
+      topics: { fraction: topic(), decimal: topic(), percent: topic() },
+      ...overrides,
+    },
+  };
+}
+
+describe('checkPracticeBadges', () => {
+  it('awards First Test after one completed test, and Test Taker at 10', () => {
+    expect(checkPracticeBadges(practiceStats(), new Set())).toEqual([]);
+    expect(checkPracticeBadges(practiceStats({ testsTaken: 1 }), new Set())).toEqual(['practice-first']);
+    expect(checkPracticeBadges(practiceStats({ testsTaken: 9 }), new Set(['practice-first']))).toEqual([]);
+    expect(checkPracticeBadges(practiceStats({ testsTaken: 10 }), new Set(['practice-first']))).toEqual(['practice-tests-10']);
+  });
+
+  it('awards Perfect Score only for a flawless test of 10+ questions', () => {
+    const stats = practiceStats({ testsTaken: 1 });
+    const earned = new Set(['practice-first']);
+    expect(checkPracticeBadges(stats, earned, { correct: 10, total: 10 })).toEqual(['practice-perfect']);
+    expect(checkPracticeBadges(stats, earned, { correct: 15, total: 15 })).toEqual(['practice-perfect']);
+    expect(checkPracticeBadges(stats, earned, { correct: 5, total: 5 })).toEqual([]);
+    expect(checkPracticeBadges(stats, earned, { correct: 9, total: 10 })).toEqual([]);
+  });
+
+  it('does not award Perfect Score from the catch-up check (no test meta)', () => {
+    expect(checkPracticeBadges(practiceStats({ testsTaken: 1 }), new Set(['practice-first']))).toEqual([]);
+  });
+
+  it('awards Form Shifter only when all three topics have 20+ answers at 80%+', () => {
+    const fluent = (c, t) => ({ correctCount: c, totalCount: t });
+    const earned = new Set(['practice-first']);
+    const base = { testsTaken: 3 };
+    expect(checkPracticeBadges(practiceStats({ ...base, topics: { fraction: fluent(20, 20), decimal: fluent(20, 20), percent: fluent(16, 20) } }), earned))
+      .toContain('practice-shifter');
+    // one topic too weak
+    expect(checkPracticeBadges(practiceStats({ ...base, topics: { fraction: fluent(20, 20), decimal: fluent(20, 20), percent: fluent(15, 20) } }), earned))
+      .not.toContain('practice-shifter');
+    // one topic not practiced enough
+    expect(checkPracticeBadges(practiceStats({ ...base, topics: { fraction: fluent(20, 20), decimal: fluent(20, 20), percent: fluent(19, 19) } }), earned))
+      .not.toContain('practice-shifter');
+  });
+
+  it('never re-awards an earned badge', () => {
+    const stats = practiceStats({ testsTaken: 10 });
+    const all = new Set(['practice-first', 'practice-tests-10', 'practice-perfect', 'practice-shifter']);
+    expect(checkPracticeBadges(stats, all, { correct: 10, total: 10 })).toEqual([]);
+  });
+
+  it('is safe on stats without a practice node (older cached stats)', () => {
+    expect(checkPracticeBadges(blankStats(), new Set())).toEqual([]);
+  });
+
+  it('does not let practice tests count toward the game badges', () => {
+    const stats = practiceStats({ testsTaken: 200, correctCount: 2000, totalCount: 2000 });
+    const earned = checkGameEndBadges(stats, new Set(), 0, 0, false);
+    expect(earned).not.toContain('persistence-5');
+    expect(earned).not.toContain('lifetime-1000');
+    expect(earned).not.toContain('sharpshooter');
+  });
+});
+
+describe('getNextBadgeProgress — practice tests', () => {
+  it('shows progress toward Test Taker once First Test is earned', () => {
+    const stats = practiceStats({ testsTaken: 4 });
+    const item = getNextBadgeProgress(stats, new Set(['practice-first'])).find(i => i.id === 'practice-tests-10');
+    expect(item.percent).toBe(40);
+    expect(item.caption).toBe('4 / 10 Practice Tests completed');
   });
 });

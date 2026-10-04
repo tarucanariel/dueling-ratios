@@ -197,6 +197,7 @@ export function watchAuthState(callback){
 // because it already had its own separate local import.
 export { STATS_MODES, OPERATIONS } from './constants.js';
 import { STATS_MODES, OPERATIONS } from './constants.js';
+import { PRACTICE_TOPICS, PERFECT_TEST_MIN_QUESTIONS } from './practiceLogic.js';
 
 // Firebase Realtime Database paths can't contain '.', '#', '$', '[', ']',
 // or '/' — none of our operation symbols hit that, but '÷' and '×' are
@@ -235,6 +236,26 @@ export async function recordGameResult(uid, modeKey, correctCount, wrongCount, o
   return update(ref(db), updates);
 }
 
+/* Records a finished Practice Test. Kept in its own playerStats/{uid}/practice
+   node (not a STATS_MODES entry) so practice answers never feed the
+   games-played / lifetime-accuracy badges, which are about the game itself.
+   `byTopic` is scoreTest()'s { topic: { correct, total } } breakdown. */
+export async function recordPracticeResult(uid, { correct, total, byTopic }){
+  const base = `playerStats/${uid}/practice`;
+  const updates = {
+    [`${base}/testsTaken`]: increment(1),
+    [`${base}/correctCount`]: increment(correct),
+    [`${base}/totalCount`]: increment(total),
+  };
+  if(total >= PERFECT_TEST_MIN_QUESTIONS && correct === total) updates[`${base}/perfectTests`] = increment(1);
+  Object.entries(byTopic || {}).forEach(([topic, t]) => {
+    if(!PRACTICE_TOPICS.includes(topic)) return;
+    updates[`${base}/topics/${topic}/correctCount`] = increment(t.correct);
+    updates[`${base}/topics/${topic}/totalCount`] = increment(t.total);
+  });
+  return update(ref(db), updates);
+}
+
 export async function getPlayerStats(uid){
   const snap = await get(ref(db, `playerStats/${uid}`));
   const data = snap.exists() ? snap.val() : {};
@@ -250,6 +271,20 @@ export async function getPlayerStats(uid){
   // Ratio Dash's race-only counters (see recordGameResult's `extras`).
   stats.dash.wins = (data.dash && data.dash.wins) || 0;
   stats.dash.podiums = (data.dash && data.dash.podiums) || 0;
+  // Practice Test totals (see recordPracticeResult) — defaulted to zero,
+  // same defensive shape as the per-mode stats, so callers never null-check.
+  const pd = data.practice || {};
+  stats.practice = {
+    testsTaken: pd.testsTaken || 0,
+    perfectTests: pd.perfectTests || 0,
+    correctCount: pd.correctCount || 0,
+    totalCount: pd.totalCount || 0,
+    topics: {},
+  };
+  PRACTICE_TOPICS.forEach((topic) => {
+    const t = (pd.topics && pd.topics[topic]) || {};
+    stats.practice.topics[topic] = { correctCount: t.correctCount || 0, totalCount: t.totalCount || 0 };
+  });
   // Per-operation lifetime totals, for the operation-mastery badges —
   // same read, just a different sub-node of playerStats/{uid}. Always
   // returns an entry for every op (defaulting to zero), same defensive

@@ -14,6 +14,7 @@
    ========================================================= */
 
 import { STATS_MODES, OPERATIONS } from './constants.js';
+import { PRACTICE_TOPICS, PERFECT_TEST_MIN_QUESTIONS } from './practiceLogic.js';
 
 // Maps a problem's operation symbol (as used throughout logic.js/main.js)
 // to its operation-mastery badge id and a plain-English noun for badge
@@ -34,6 +35,10 @@ const QUICK_THINKER_PAIR_COUNT = 2;
 const QUICK_THINKER_TIME_SECONDS = 30;
 const SPEED_MASTER_PAIR_COUNT = 5;
 const SPEED_MASTER_TIME_SECONDS = 60;
+
+// Form Shifter — fluent in all three forms, not just one.
+const PRACTICE_SHIFTER_MIN_ANSWERED = 20;
+const PRACTICE_SHIFTER_MIN_ACCURACY = 0.8;
 
 export const BADGE_DEFS = [
   { id: 'persistence-5',   emoji: '🌱', name: 'Getting Started', description: 'Play 5 games.' },
@@ -61,6 +66,11 @@ export const BADGE_DEFS = [
   { id: 'dash-wins-5',       emoji: '👑', name: 'Dash Champion',  description: 'Win 5 Ratio Dash races.' },
   { id: 'dash-comeback',     emoji: '🔄', name: 'Comeback Kid',   description: 'Win a Ratio Dash race after being in last place.' },
   { id: 'dash-clean-sprint', emoji: '💎', name: 'Clean Sprint',   description: 'Win a Ratio Dash race without a single mistake.' },
+  // Practice Test — personal progress only, same as every other badge.
+  { id: 'practice-first',     emoji: '📝', name: 'First Test',     description: 'Complete a Practice Test.' },
+  { id: 'practice-tests-10',  emoji: '📋', name: 'Test Taker',     description: 'Complete 10 Practice Tests.' },
+  { id: 'practice-perfect',   emoji: '⭐', name: 'Perfect Score',  description: `Get every question right on a Practice Test of ${PERFECT_TEST_MIN_QUESTIONS} or more.` },
+  { id: 'practice-shifter',   emoji: '🦎', name: 'Form Shifter',   description: `${PRACTICE_SHIFTER_MIN_ANSWERED}+ answers at ${PRACTICE_SHIFTER_MIN_ACCURACY * 100}%+ accuracy in each of fractions, decimals and percents, across Practice Tests.` },
 ];
 
 export const BADGE_DEFS_BY_ID = Object.fromEntries(BADGE_DEFS.map((b) => [b.id, b]));
@@ -192,6 +202,34 @@ export function checkDashBadges(stats, earnedBadgeIds, raceMeta = {}){
   return newlyEarned;
 }
 
+/* Practice Test badges. Call after a test's result has been recorded (so
+   `stats.practice` already includes it), and also from the catch-up check
+   with no `testMeta` — the perfect-score badge is per-test, so it only
+   fires when testMeta says so. `testMeta`: { correct, total } for the test
+   just finished. Returns the newly-earned badge ids. */
+export function checkPracticeBadges(stats, earnedBadgeIds, testMeta = {}){
+  const newlyEarned = [];
+  const p = stats.practice;
+  if(!p) return newlyEarned;
+
+  if(p.testsTaken >= 1 && !earnedBadgeIds.has('practice-first')) newlyEarned.push('practice-first');
+  if(p.testsTaken >= 10 && !earnedBadgeIds.has('practice-tests-10')) newlyEarned.push('practice-tests-10');
+
+  const { correct, total } = testMeta;
+  if(total >= PERFECT_TEST_MIN_QUESTIONS && correct === total && !earnedBadgeIds.has('practice-perfect')){
+    newlyEarned.push('practice-perfect');
+  }
+
+  if(!earnedBadgeIds.has('practice-shifter')){
+    const fluent = PRACTICE_TOPICS.every((topic) => {
+      const t = p.topics?.[topic] || { correctCount: 0, totalCount: 0 };
+      return t.totalCount >= PRACTICE_SHIFTER_MIN_ANSWERED && t.correctCount / t.totalCount >= PRACTICE_SHIFTER_MIN_ACCURACY;
+    });
+    if(fluent) newlyEarned.push('practice-shifter');
+  }
+  return newlyEarned;
+}
+
 /* Call live, mid-game, right where streak milestones are already
    detected (see isStreakMilestone/streakTierFor in main.js) — passed
    the player's current streak count. Exact-equality checks are safe
@@ -234,6 +272,7 @@ const PROGRESS_FAMILIES = [
   ['multiplication-mastery'],
   ['division-mastery'],
   ['dash-first-win', 'dash-wins-5'],
+  ['practice-first', 'practice-tests-10'],
 ];
 
 const PROGRESS_TARGETS = {
@@ -245,6 +284,8 @@ const PROGRESS_TARGETS = {
   'lifetime-1000':   { kind: 'count', target: 1000 },
   'dash-first-win':  { kind: 'count', target: 1, source: 'dashWins' },
   'dash-wins-5':     { kind: 'count', target: 5, source: 'dashWins' },
+  'practice-first':    { kind: 'count', target: 1, source: 'practiceTests' },
+  'practice-tests-10': { kind: 'count', target: 10, source: 'practiceTests' },
   'addition-mastery':       { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '+' },
   'subtraction-mastery':    { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '-' },
   'multiplication-mastery': { kind: 'accuracy', minAnswered: OP_MASTERY_MIN_ANSWERED, minAccuracy: OP_MASTERY_MIN_ACCURACY, op: '×' },
@@ -278,9 +319,11 @@ export function getNextBadgeProgress(stats, earnedBadgeIds){
 
     if(target.kind === 'count'){
       const current = target.source === 'dashWins' ? (stats.dash?.wins || 0)
+        : target.source === 'practiceTests' ? (stats.practice?.testsTaken || 0)
         : nextId === 'lifetime-1000' ? correct : totalGames;
       percent = Math.min(100, Math.round((current / target.target) * 100));
       const noun = target.source === 'dashWins' ? 'Ratio Dash wins'
+        : target.source === 'practiceTests' ? 'Practice Tests completed'
         : nextId === 'lifetime-1000' ? 'correct answers' : 'games played';
       caption = `${current} / ${target.target} ${noun}`;
     } else { // 'accuracy'
