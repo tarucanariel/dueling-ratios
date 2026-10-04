@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateQuestion, generateTest, scoreTest,
-  PRACTICE_TOPICS, PRACTICE_DIFFICULTIES, resultTier,
+  PRACTICE_TOPICS, PRACTICE_DIFFICULTIES, resultTier, createQuestionStream,
 } from './practiceLogic.js';
 
 // Independent check of every answer: parse the text back into a number.
@@ -191,5 +191,82 @@ describe('resultTier', () => {
     expect(resultTier(60)).toBe('good');
     expect(resultTier(59.9)).toBe('keepgoing');
     expect(resultTier(0)).toBe('keepgoing');
+  });
+});
+
+describe('createQuestionStream (shared Ratio Dash sequence)', () => {
+  const take = (stream, n) => Array.from({ length: n }, (_, i) => stream.at(i));
+
+  it('gives the same questions for the same seed, settings and index', () => {
+    const a = createQuestionStream({ seed: 4242, topics: ['fraction', 'decimal', 'percent'], difficulty: 'hard' });
+    const b = createQuestionStream({ seed: 4242, topics: ['fraction', 'decimal', 'percent'], difficulty: 'hard' });
+    expect(take(a, 60)).toEqual(take(b, 60));
+  });
+
+  it('gives different questions for different seeds', () => {
+    const a = take(createQuestionStream({ seed: 1 }), 20).map(q => q.prompt + q.options.join());
+    const b = take(createQuestionStream({ seed: 2 }), 20).map(q => q.prompt + q.options.join());
+    expect(a).not.toEqual(b);
+  });
+
+  it('does not depend on the order questions are asked for (a reconnecting racer)', () => {
+    const sequential = take(createQuestionStream({ seed: 99 }), 25);
+    const jumpy = createQuestionStream({ seed: 99 });
+    expect(jumpy.at(24)).toEqual(sequential[24]);
+    expect(jumpy.at(3)).toEqual(sequential[3]);
+    expect(jumpy.at(12)).toEqual(sequential[12]);
+    expect(jumpy.at(3)).toBe(jumpy.at(3)); // cached, not regenerated
+  });
+
+  it('keeps two streams independent even when used in turn', () => {
+    const solo = take(createQuestionStream({ seed: 7 }), 15);
+    const x = createQuestionStream({ seed: 7 });
+    const y = createQuestionStream({ seed: 8 });
+    const mixed = [];
+    for (let i = 0; i < 15; i++){ mixed.push(x.at(i)); y.at(i); }
+    expect(mixed).toEqual(solo);
+  });
+
+  it('only uses the chosen topics and rotates through them', () => {
+    const qs = take(createQuestionStream({ seed: 5, topics: ['decimal', 'percent'] }), 20);
+    expect(qs.every(q => q.topic === 'decimal' || q.topic === 'percent')).toBe(true);
+    expect(qs.filter(q => q.topic === 'decimal')).toHaveLength(10);
+    expect(qs.filter(q => q.topic === 'percent')).toHaveLength(10);
+  });
+
+  it('falls back to all topics when none are valid', () => {
+    const qs = take(createQuestionStream({ seed: 5, topics: [] }), 9);
+    expect(new Set(qs.map(q => q.topic)).size).toBe(3);
+  });
+
+  it('produces valid, correct questions at both difficulties', () => {
+    for (const difficulty of PRACTICE_DIFFICULTIES){
+      take(createQuestionStream({ seed: 31337, difficulty }), 120).forEach((q) => {
+        expect(q.options).toHaveLength(4);
+        expect(q.answerIndex).toBeGreaterThanOrEqual(0);
+        expect(q.answerIndex).toBeLessThan(4);
+        if (q.kind.includes('>')){
+          const shown = q.prompt.match(/^Write (\S+) as a/)[1];
+          expect(close(parse(q.options[q.answerIndex]), parse(shown))).toBe(true);
+        }
+      });
+    }
+  });
+
+  it('does not repeat an identical question back to back', () => {
+    const qs = take(createQuestionStream({ seed: 2024, difficulty: 'easy' }), 40);
+    const keys = qs.map(q => q.prompt + '|' + q.options.slice().sort().join(','));
+    expect(new Set(keys).size).toBeGreaterThan(30);
+  });
+
+  it('leaves normal (unseeded) generation random afterwards', () => {
+    createQuestionStream({ seed: 1 }).at(10);
+    const prompts = new Set(Array.from({ length: 40 }, () => generateQuestion('fraction', 'hard').prompt + Math.random()));
+    expect(prompts.size).toBeGreaterThan(20);
+    // and a fresh generateTest still varies between calls
+    const t1 = generateTest({ count: 10 }).map(q => q.prompt).join();
+    const t2 = generateTest({ count: 10 }).map(q => q.prompt).join();
+    const t3 = generateTest({ count: 10 }).map(q => q.prompt).join();
+    expect(new Set([t1, t2, t3]).size).toBeGreaterThan(1);
   });
 });

@@ -10,7 +10,7 @@
    or "percent"), which is what the results breakdown is grouped by.
    ========================================================= */
 
-import { reduce, randInt } from './logic.js';
+import { reduce } from './logic.js';
 
 export const PRACTICE_TOPICS = ['fraction', 'decimal', 'percent'];
 export const PRACTICE_LENGTHS = [5, 10, 15];
@@ -23,17 +23,39 @@ const OPTION_COUNT = 4;
 
 /* ---------- small helpers ---------- */
 
+/* Every random choice in this module goes through `rand`, which is just
+   Math.random — except while a question stream is generating (see
+   createQuestionStream), when it is that stream's seeded generator, so the
+   same seed always yields the same questions on every device. */
+let rand = Math.random;
+
+const randInt = (min, max) => Math.floor(rand() * (max - min + 1)) + min;
+
+// A small, fast, well-distributed seeded generator (mulberry32). It uses
+// only integer maths and one division, so every JS engine gives the
+// identical sequence for the same seed.
+function seededRandom(seed){
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function shuffle(arr){
   const a = arr.slice();
   for(let i = a.length - 1; i > 0; i--){
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
 }
 
 function pick(arr){
-  return arr[Math.floor(Math.random() * arr.length)];
+  return arr[Math.floor(rand() * arr.length)];
 }
 
 /* ---------- exact rational arithmetic on reduced [n, d] ---------- */
@@ -91,7 +113,7 @@ const ARITHMETIC_DENOMINATORS = {
 function pickValue(difficulty, { allowImproper = difficulty === 'hard' } = {}){
   for(;;){
     const d = pick(DENOMINATORS[difficulty]);
-    const maxN = allowImproper && Math.random() < 0.25 ? 2 * d - 1 : d - 1;
+    const maxN = allowImproper && rand() < 0.25 ? 2 * d - 1 : d - 1;
     const v = reduce(randInt(1, maxN), d);
     if(v[1] !== 1) return v;
   }
@@ -221,7 +243,7 @@ function ofQuestion(form, difficulty){
 
 // Add or subtract two values written in different forms; the answer's form is the topic.
 function mixedQuestion(topic, difficulty){
-  const op = Math.random() < 0.5 ? '+' : '−';
+  const op = rand() < 0.5 ? '+' : '−';
   let a, b;
   do {
     a = pickArithmeticValue(difficulty);
@@ -263,7 +285,7 @@ function compareQuestion(topic, difficulty){
     if(!values.some(x => eqR(x, v))) values.push(v);
   }
   values.sort(cmpR);
-  const wantGreatest = Math.random() < 0.5;
+  const wantGreatest = rand() < 0.5;
   const winner = wantGreatest ? values[OPTION_COUNT - 1] : values[0];
 
   // The answer is written in the topic's form; the others in any form.
@@ -308,6 +330,48 @@ const KINDS = {
 };
 
 /* ---------- public API ---------- */
+
+/* One endless, repeatable sequence of questions for a Ratio Dash race:
+   every racer builds the stream from the same { seed, topics, difficulty }
+   (stored in the race's settings) and so answers the same question N-th.
+   `at(i)` is the i-th question; it is generated in order and cached, so
+   asking for any index in any order gives the same result everywhere —
+   which is also what lets a racer who reconnects pick up at their own next
+   question. Topics rotate in a seeded-shuffled order, and a question that
+   repeats an earlier one (same prompt and options) is re-rolled. */
+export function createQuestionStream({ seed = 0, topics = PRACTICE_TOPICS, difficulty = 'easy' } = {}){
+  const chosen = PRACTICE_TOPICS.filter(t => topics.includes(t));
+  const pool = chosen.length ? chosen : PRACTICE_TOPICS;
+  const gen = seededRandom(seed);
+  const questions = [];
+  const seen = new Set();
+
+  const withSeededRandom = (fn) => {
+    const previous = rand;
+    rand = gen;
+    try{ return fn(); } finally { rand = previous; }
+  };
+  const order = withSeededRandom(() => shuffle(pool));
+
+  return {
+    at(index){
+      while(questions.length <= index){
+        const topic = order[questions.length % order.length];
+        const q = withSeededRandom(() => {
+          let candidate;
+          for(let tries = 0; tries < 30; tries++){
+            candidate = generateQuestion(topic, difficulty);
+            const key = candidate.prompt + '|' + candidate.options.slice().sort().join(',');
+            if(!seen.has(key)){ seen.add(key); break; }
+          }
+          return candidate;
+        });
+        questions.push(q);
+      }
+      return questions[index];
+    },
+  };
+}
 
 export function generateQuestion(topic, difficulty = 'easy'){
   return pick(KINDS[topic])(difficulty);
