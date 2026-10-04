@@ -14,6 +14,8 @@ import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace,
 import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, humanCount, isCompetitiveRace, isRaceStale, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
 import { avatarUrlForPlayer } from './dashAvatar.js';
 import { initPracticeUI, closePracticeTest } from './practiceUI.js';
+import { createQuestionStream } from './practiceLogic.js';
+import { mathHtml } from './mathHtml.js';
 import { playDashCorrect, playDashWrong, playDashCountdownTick, startDashMusic, stopDashMusic } from './dashAudio.js';
 
 /* =========================================================
@@ -38,6 +40,7 @@ const state = {
 
   // Ratio Dash (see the Ratio Dash section near the end of this file)
   dashChoice: null,      // 'host' | 'join' (setup screen only)
+  dashQuestionSet: 'fractions', // 'fractions' | 'practice' — what a hosted race asks (setup screen only)
   dash: null,            // live race session, or null — see enterDash()
 
   // Online play
@@ -122,6 +125,18 @@ const el = {
   stepDashBotSkill: document.getElementById('step-dash-botskill'),
   dashBotSkillSelect: document.getElementById('dash-botskill-select'),
   dashLengthSelect: document.getElementById('dash-length-select'),
+  stepDashQuestions: document.getElementById('step-dash-questions'),
+  dashQsFractionsBtn: document.getElementById('dash-qs-fractions-btn'),
+  dashQsPracticeBtn: document.getElementById('dash-qs-practice-btn'),
+  dashQsNote: document.getElementById('dash-qs-note'),
+  stepDashTopics: document.getElementById('step-dash-topics'),
+  dashTopicChoices: document.querySelectorAll('.dash-topic-choice'),
+  stepDashDifficulty: document.getElementById('step-dash-difficulty'),
+  dashDifficultyBtns: document.querySelectorAll('#dash-difficulty-row .choice-btn'),
+  dashQuestion: document.getElementById('dash-question'),
+  dashQLabel: document.getElementById('dash-q-label'),
+  dashQPrompt: document.getElementById('dash-q-prompt'),
+  dashQOptions: document.getElementById('dash-q-options'),
   dashPenaltySelect: document.getElementById('dash-penalty-select'),
   dashRank: document.getElementById('dash-rank'),
   dashCountdown: document.getElementById('dash-countdown'),
@@ -2019,8 +2034,19 @@ function updateStepVisibility(){
   // wrong-answer setback — a race has no timer or pair count.
   const showHostSettings = (mode === 'solo' || mode === 'vs' || mode === 'computer') || (mode === 'online' && onlineChoice === 'create');
   const showDashSettings = mode === 'dash' && dashChoice === 'host';
-  el.stepOperations.classList.toggle('hidden', !(showHostSettings || showDashSettings));
-  el.stepNegatives.classList.toggle('hidden', !(showHostSettings || showDashSettings));
+  // A race can ask fraction operations (the operations/negatives settings
+  // apply) or Practice Test items (topics and difficulty apply instead).
+  const dashPractice = showDashSettings && state.dashQuestionSet === 'practice';
+  el.stepOperations.classList.toggle('hidden', !(showHostSettings || (showDashSettings && !dashPractice)));
+  el.stepNegatives.classList.toggle('hidden', !(showHostSettings || (showDashSettings && !dashPractice)));
+  el.stepDashQuestions.classList.toggle('hidden', !showDashSettings);
+  el.stepDashTopics.classList.toggle('hidden', !dashPractice);
+  el.stepDashDifficulty.classList.toggle('hidden', !dashPractice);
+  el.dashQsFractionsBtn.classList.toggle('selected', state.dashQuestionSet === 'fractions');
+  el.dashQsPracticeBtn.classList.toggle('selected', state.dashQuestionSet === 'practice');
+  el.dashQsNote.textContent = dashPractice
+    ? 'One multiple-choice question per step. Everyone in the race gets the same questions in the same order.'
+    : 'Step-by-step fraction problems: tap the number for each glowing slot.';
   el.stepDashLength.classList.toggle('hidden', !showDashSettings);
   el.stepDashPenalty.classList.toggle('hidden', !showDashSettings);
   el.stepDashBots.classList.toggle('hidden', !showDashSettings);
@@ -5212,6 +5238,16 @@ const DASH_BOT_SKILL = {
   hard:   { errorChance: 0.12, minDelayMs: 2200, maxDelayMs: 4000 },
 };
 
+/* In a Practice Test race a bot move stands for reading a whole question
+   and picking an option, which takes a person noticeably longer than
+   tapping one tile — so those races use this slower table (same mistake
+   rates, roughly 1.6x the delays). */
+const DASH_BOT_SKILL_PRACTICE = {
+  easy:   { errorChance: 0.35, minDelayMs: 7000, maxDelayMs: 12000 },
+  medium: { errorChance: 0.22, minDelayMs: 5000, maxDelayMs: 9000 },
+  hard:   { errorChance: 0.12, minDelayMs: 3500, maxDelayMs: 6500 },
+};
+
 function maybeScheduleComputerTurn(){
   if(state.mode !== 'computer' || state.currentPlayer !== 1) return;
   const { minDelayMs, maxDelayMs } = COMPUTER_DIFFICULTY[state.difficulty];
@@ -5367,6 +5403,10 @@ function showWinner(){
    module-level code here stays inert until the player picks the mode.
    ========================================================= */
 
+const DASH_TOPIC_LABELS = { fraction: 'Fractions', decimal: 'Decimals', percent: 'Percents' };
+const DASH_OPTION_LETTERS = ['A', 'B', 'C', 'D'];
+const DASH_QUESTION_CORRECT_DELAY_MS = 450;  // a right answer glides straight to the next question
+const DASH_QUESTION_REVEAL_MS = 1800;        // a wrong one shows the right answer for this long first
 const DASH_UNLOCK_DELAY_MS = 250;      // matches the normal correct-answer re-render delay
 const DASH_NEXT_PROBLEM_DELAY_MS = 700; // matches finishPair()'s pause
 const DASH_END_RESULTS_DELAY_MS = 2200; // lets the winner's final glide play before results cover the track
@@ -5386,6 +5426,18 @@ function selectDashChoice(choice){
 }
 el.dashHostBtn.addEventListener('click', () => selectDashChoice('host'));
 el.dashBotsSelect.addEventListener('change', updateStepVisibility);
+[el.dashQsFractionsBtn, el.dashQsPracticeBtn].forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.dashQuestionSet = btn.dataset.questions;
+    el.setupError.textContent = '';
+    updateStepVisibility();
+  });
+});
+el.dashDifficultyBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    el.dashDifficultyBtns.forEach(b => b.classList.toggle('selected', b === btn));
+  });
+});
 el.dashJoinBtn.addEventListener('click', () => selectDashChoice('join'));
 
 async function handleDashHost(){
@@ -5394,18 +5446,37 @@ async function handleDashHost(){
     el.setupError.textContent = 'Please enter your name, or sign in with Google.';
     return;
   }
-  const selectedOps = Array.from(el.opChoices).filter(cb => cb.checked).map(cb => cb.dataset.op);
-  if(selectedOps.length === 0){
-    el.setupError.textContent = 'Please select at least one operation to practice.';
-    return;
+  // What the race asks: fraction operations (the original) or Practice Test
+  // items. A Practice Test race stores one random seed, so every racer's
+  // device builds the same question sequence from it.
+  let questionSettings;
+  if(state.dashQuestionSet === 'practice'){
+    const topics = Array.from(el.dashTopicChoices).filter(cb => cb.checked).map(cb => cb.dataset.topic);
+    if(topics.length === 0){
+      el.setupError.textContent = 'Please select at least one topic.';
+      return;
+    }
+    const picked = document.querySelector('#dash-difficulty-row .selected');
+    questionSettings = {
+      questionSet: 'practice',
+      practiceTopics: topics,
+      practiceDifficulty: picked ? picked.dataset.difficulty : 'easy',
+      practiceSeed: Math.floor(Math.random() * 2147483647),
+    };
+  } else {
+    const selectedOps = Array.from(el.opChoices).filter(cb => cb.checked).map(cb => cb.dataset.op);
+    if(selectedOps.length === 0){
+      el.setupError.textContent = 'Please select at least one operation to practice.';
+      return;
+    }
+    questionSettings = { questionSet: 'fractions', allowedOps: selectedOps, allowNegatives: el.allowNegatives.checked };
   }
 
   el.startBtn.disabled = true;
   el.setupError.textContent = '';
   try{
     const { code, uid } = await createRace(name, {
-      allowedOps: selectedOps,
-      allowNegatives: el.allowNegatives.checked,
+      ...questionSettings,
       trackLength: parseInt(el.dashLengthSelect.value, 10),
       wrongStepBack: parseInt(el.dashPenaltySelect.value, 10),
       botCount: parseInt(el.dashBotsSelect.value, 10) || 0,
@@ -5469,6 +5540,10 @@ function enterDash(code, uid, isHost, { rejoin = false } = {}){
     presence: trackDashPresence(code, uid, isHost, { started: rejoin }),
     trackLength: DASH_TRACK_LENGTH,        // the real values come from the race's settings
     wrongStepBack: DASH_WRONG_STEP_BACK,   // when the race UI starts (startDashRaceUI)
+    questionSet: 'fractions', // 'practice' once the race UI starts for a Practice Test race
+    stream: null,        // practice only: the race's shared question sequence
+    questionIndex: 0,    // practice only: how many questions this racer has answered
+    currentQuestion: null,
     began: false,        // countdown finished and problems are live
     countdownTimer: null,
     lastCount: null,
@@ -5524,7 +5599,8 @@ function clearDashWaitTimer(){
 function cleanupDash(){
   const d = state.dash;
   stopDashMusic();
-  el.gameScreen.classList.remove('dash-mode', 'dash-counting');
+  el.gameScreen.classList.remove('dash-mode', 'dash-counting', 'dash-practice');
+  el.dashQOptions.innerHTML = '';
   el.dashCountdown.classList.add('hidden');
   el.dashTrackWrap.classList.add('hidden');
   el.dashLobbyModal.classList.add('hidden');
@@ -5651,7 +5727,8 @@ function startDashBots(){
 function tickDashBots(){
   const d = state.dash;
   if(!d || d.ending || !d.began || !d.race) return;
-  const skill = DASH_BOT_SKILL[d.race.settings.botSkill] || DASH_BOT_SKILL.medium;
+  const skillTable = d.questionSet === 'practice' ? DASH_BOT_SKILL_PRACTICE : DASH_BOT_SKILL;
+  const skill = skillTable[d.race.settings.botSkill] || skillTable.medium;
   const now = Date.now();
 
   Object.values(d.race.players).filter(p => p.isBot && !p.finished).forEach((bot) => {
@@ -5751,7 +5828,11 @@ function renderDashLobby(race){
 
   const steps = (race.settings && race.settings.trackLength) || DASH_TRACK_LENGTH;
   const back = (race.settings && race.settings.wrongStepBack) || DASH_WRONG_STEP_BACK;
-  el.dashLobbyRules.textContent = `${steps} steps to the finish \u00B7 a wrong answer sends you back ${back} step${back === 1 ? '' : 's'}`
+  const practice = !!race.settings && race.settings.questionSet === 'practice';
+  const questionsLabel = practice
+    ? `Practice Test items: ${(race.settings.practiceTopics || []).map(t => DASH_TOPIC_LABELS[t] || t).join(', ')} (${race.settings.practiceDifficulty === 'hard' ? 'hard' : 'easy'})`
+    : 'fraction operations';
+  el.dashLobbyRules.textContent = `${steps} steps to the finish \u00B7 a wrong answer sends you back ${back} step${back === 1 ? '' : 's'} \u00B7 ${questionsLabel}`
     + (race.settings && race.settings.botCount > 0 ? ` \u00B7 bots: ${race.settings.botSkill || 'medium'}` : '');
 
   const botCount = players.length - humanCount(race.players);
@@ -5792,7 +5873,19 @@ function startDashRaceUI(race){
   d.correctCount = (me && me.correctCount) || 0;
   d.wrongCount = (me && me.wrongCount) || 0;
   d.finishing = !!(me && me.finished);
-  state.allowedOps = race.settings.allowedOps;
+  d.questionSet = race.settings.questionSet === 'practice' ? 'practice' : 'fractions';
+  if(d.questionSet === 'practice'){
+    d.stream = createQuestionStream({
+      seed: race.settings.practiceSeed,
+      topics: race.settings.practiceTopics || [],
+      difficulty: race.settings.practiceDifficulty === 'hard' ? 'hard' : 'easy',
+    });
+    // Progress lives in the database, so a racer who reconnects carries on at
+    // their own next question of the shared sequence.
+    d.questionIndex = d.correctCount + d.wrongCount;
+    el.gameScreen.classList.add('dash-practice');
+  }
+  state.allowedOps = race.settings.allowedOps || [];
   state.allowNegatives = !!race.settings.allowNegatives;
   state.timeControlSeconds = 0;
   state.totalPairs = Number.MAX_SAFE_INTEGER; // a race has no pair limit — only the finish line ends it
@@ -5862,7 +5955,8 @@ function beginDashRace(fromCountdown){
   }
   announceGameStart(activeTileEffectId());
   startDashMusic();
-  startNextPair();
+  if(d.questionSet === 'practice') showDashQuestion();
+  else startNextPair();
   startDashBots();
 }
 
@@ -6087,6 +6181,95 @@ function handleDashTileClick(tileId){
   } else {
     state.inputLocked = false;
   }
+}
+
+/* ---------- Practice Test questions ----------
+   When the host picked "Practice Test items" the board shows one
+   multiple-choice question at a time instead of the fraction grid. Every
+   racer builds the same question sequence from the seed stored in the
+   race (see createQuestionStream), so the N-th question is identical for
+   everyone. A correct answer is +1 step; a wrong one shows the right
+   answer, goes back the race's setback, and moves on to the next question
+   (no retry, so guessing through the options can't pay off). */
+
+function showDashQuestion(){
+  const d = state.dash;
+  if(!d || d.ending || !d.stream) return;
+  const q = d.stream.at(d.questionIndex);
+  d.currentQuestion = q;
+  state.inputLocked = false;
+  el.dashQuestion.classList.remove('locked');
+  el.feedbackLine.textContent = '';
+  el.feedbackLine.className = 'feedback-line';
+  el.dashQLabel.textContent = `Question ${d.questionIndex + 1}`;
+  el.dashQPrompt.innerHTML = mathHtml(q.prompt);
+  el.dashQOptions.innerHTML = '';
+  q.options.forEach((text, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pt-option';
+    btn.innerHTML = `<span class="pt-letter">${DASH_OPTION_LETTERS[i]}</span><span>${mathHtml(text)}</span>`;
+    btn.addEventListener('click', () => handleDashAnswer(i));
+    el.dashQOptions.appendChild(btn);
+  });
+  el.problemStrip.closest('.board-area').scrollTop = 0;
+}
+
+function handleDashAnswer(choice){
+  const d = state.dash;
+  if(!d || !d.started || !d.began || d.ending || d.finishing || !d.currentQuestion) return;
+  if(state.inputLocked) return;
+  state.inputLocked = true;
+  el.dashQuestion.classList.add('locked');
+
+  const q = d.currentQuestion;
+  const isCorrect = choice === q.answerIndex;
+  const player = state.players[0];
+  const optionEls = Array.from(el.dashQOptions.children);
+
+  d.questionIndex += 1;
+  d.position = nextPosition(d.position, isCorrect, d.trackLength, d.wrongStepBack);
+
+  if(isCorrect){
+    d.correctCount += 1;
+    player.streak = (player.streak || 0) + 1;
+    playCorrectSound(activeTileEffectId());
+    optionEls[choice].classList.add('correct');
+    el.feedbackLine.textContent = 'Correct! +1 step';
+    el.feedbackLine.className = 'feedback-line good';
+    if(isStreakMilestone(player.streak)){
+      const tier = streakTierFor(player.streak);
+      playSound(tier.sound);
+      showStreakPopup(streakPopupText(player.name, player.streak, false), tier.cssClass);
+    }
+    if(state.googleUser){
+      const badgeId = checkStreakBadge(player.streak, state.myBadges);
+      if(badgeId) awardAndCelebrateBadges([badgeId]);
+      // No trackOpTally here: these questions have no fraction operation.
+    }
+  } else {
+    d.wrongCount += 1;
+    player.streak = 0;
+    playSound('wrong');
+    optionEls[choice].classList.add('wrong');
+    optionEls[q.answerIndex].classList.add('correct');
+    el.feedbackLine.textContent = `Not quite \u2014 the answer was ${q.options[q.answerIndex]}. Back ${d.wrongStepBack} step${d.wrongStepBack === 1 ? '' : 's'}!`;
+    el.feedbackLine.className = 'feedback-line bad';
+  }
+
+  const progress = { position: d.position, correctCount: d.correctCount, wrongCount: d.wrongCount };
+  if(d.position >= d.trackLength){
+    // Crossed the line — input stays locked; the listener ends the race.
+    d.finishing = true;
+    el.feedbackLine.textContent = '\u{1F3C1} You crossed the finish line!';
+    finishRace(d.code, d.uid, progress).catch((err) => console.error('Failed to record Ratio Dash finish:', err));
+    return;
+  }
+  reportProgress(d.code, d.uid, progress).catch((err) => console.error('Failed to report Ratio Dash progress:', err));
+
+  setTimeout(() => {
+    if(state.dash === d && !d.ending) showDashQuestion();
+  }, isCorrect ? DASH_QUESTION_CORRECT_DELAY_MS : DASH_QUESTION_REVEAL_MS);
 }
 
 /* ---------- Teacher spectator view ----------

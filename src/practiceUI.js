@@ -9,6 +9,7 @@
 
 import { generateTest, scoreTest, resultTier } from './practiceLogic.js';
 import { playPracticeStart, playPracticeResults } from './practiceAudio.js';
+import { mathHtml } from './mathHtml.js';
 
 const TOPIC_LABELS = { fraction: 'Fractions', decimal: 'Decimals', percent: 'Percents' };
 const LETTERS = ['A', 'B', 'C', 'D'];
@@ -55,15 +56,6 @@ const session = {
 };
 
 /* ---------- helpers ---------- */
-
-function escapeHtml(text){
-  return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
-// Text from practiceLogic with each "3/4" drawn as a stacked fraction.
-function mathHtml(text){
-  return escapeHtml(text).replace(/(\d+)\/(\d+)/g, '<span class="pt-frac"><span>$1</span><span>$2</span></span>');
-}
 
 function formatTime(totalSeconds){
   const m = Math.floor(totalSeconds / 60);

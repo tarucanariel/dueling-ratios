@@ -106,6 +106,41 @@
       </div>
     </div>
 
+    <div class="setup-step hidden" id="step-dash-questions">
+      <label>Questions</label>
+      <div class="choice-row">
+        <button class="choice-btn selected" id="dash-qs-fractions-btn" type="button" data-questions="fractions">Fraction operations</button>
+        <button class="choice-btn" id="dash-qs-practice-btn" type="button" data-questions="practice">Practice Test items</button>
+      </div>
+      <p class="field-note" id="dash-qs-note"></p>
+    </div>
+
+    <div class="setup-step hidden" id="step-dash-topics">
+      <label>Which topics?</label>
+      <div class="checkbox-grid pt-topic-grid">
+        <label class="checkbox-item">
+          <input type="checkbox" class="dash-topic-choice" data-topic="fraction" checked>
+          Fractions
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="dash-topic-choice" data-topic="decimal" checked>
+          Decimals
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" class="dash-topic-choice" data-topic="percent" checked>
+          Percents
+        </label>
+      </div>
+    </div>
+
+    <div class="setup-step hidden" id="step-dash-difficulty">
+      <label>Difficulty</label>
+      <div class="choice-row choice-row-3" id="dash-difficulty-row">
+        <button class="choice-btn selected" type="button" data-difficulty="easy">Easy</button>
+        <button class="choice-btn" type="button" data-difficulty="hard">Hard</button>
+      </div>
+    </div>
+
     <div class="setup-step hidden" id="step-dash-length">
       <label for="dash-length-select">Race length</label>
       <select id="dash-length-select">
@@ -239,7 +274,7 @@
         <li><strong>Same Device</strong> — two players take turns on one screen.</li>
         <li><strong>vs Computer</strong> — take turns against a computer opponent on one screen. Choose Easy, Medium, or Hard — higher difficulties answer faster and make fewer mistakes.</li>
         <li><strong>Online</strong> — challenge someone on a different device using a shareable room code.</li>
-        <li><strong>&#127937; Ratio Dash</strong> — a race for 2 to 10 players. The host picks the operations and shares a 4-character code; everyone solves their own stream of fraction problems at the same time. After a 3-2-1 countdown, every correct number moves your avatar 1 step toward the finish line, but a wrong number sends it back — 2 steps by default — so one mistake takes two correct answers to recover. The host can also set the race length (15, 25 or 40 steps) and the setback (1 or 2 steps), and add computer racers (bots) that take up racer slots. Wins and podiums only count toward badges when at least two real people raced. The first avatar to reach the finish line wins, and a badge beside the track shows your current place. If your tab closes mid-race, reopen the game within 10 minutes and tap Rejoin to get back on the track.</li>
+        <li><strong>&#127937; Ratio Dash</strong> — a race for 2 to 10 players. The host picks the operations and shares a 4-character code; everyone solves their own stream of fraction problems at the same time. After a 3-2-1 countdown, every correct number moves your avatar 1 step toward the finish line, but a wrong number sends it back — 2 steps by default — so one mistake takes two correct answers to recover. The host can also set the race length (15, 25 or 40 steps) and the setback (1 or 2 steps), and add computer racers (bots) that take up racer slots. Wins and podiums only count toward badges when at least two real people raced. The host also chooses the questions: <strong>Fraction operations</strong> (the step-by-step problems above) or <strong>Practice Test items</strong> — multiple-choice questions on fractions, decimals and percents (see Practice Test below). In a Practice Test race every racer gets the same questions in the same order, each question is one step, and a wrong answer shows you the right one before sending you back. The first avatar to reach the finish line wins, and a badge beside the track shows your current place. If your tab closes mid-race, reopen the game within 10 minutes and tap Rejoin to get back on the track.</li>
       </ul>
 
       <h3>How to Solve a Problem</h3>
@@ -794,6 +829,11 @@
 
   <main class="board-area">
     <div class="board-main">
+      <div class="dash-question" id="dash-question">
+        <p class="dash-q-label" id="dash-q-label"></p>
+        <p class="pt-prompt" id="dash-q-prompt"></p>
+        <div class="pt-options" id="dash-q-options"></div>
+      </div>
       <div class="problem-strip" id="problem-strip">
         <!-- fraction display + operator + grid injected by JS -->
       </div>

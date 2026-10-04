@@ -23,6 +23,23 @@ a per-topic breakdown and a review with explanations.
   independently from the question text, so a wrong key can't slip through.
 - Not yet built: teacher-assigned tests.
 
+### Practice Test items in Ratio Dash
+
+When hosting a Ratio Dash race, the host chooses the questions: the original
+**Fraction operations**, or **Practice Test items** (topics and difficulty
+picked by the host). In a Practice Test race each question is one step: a
+correct answer moves you forward, a wrong one shows the right answer, steps
+you back, and moves on (no retry). The host's device stores one random seed
+in the race settings and every racer builds the same question sequence from
+it (`createQuestionStream` in `practiceLogic.js`), so the N-th question is
+identical for everyone; a reconnecting racer resumes at their own next
+question. Bots in these races use a slower pace table (`DASH_BOT_SKILL_PRACTICE`
+in `main.js`), since one move is a whole read-and-answer question. These races
+count as ordinary Ratio Dash races for stats and Dash
+badges. They do not feed operation-mastery stats or the Practice Test
+badges. No new database rules were needed (`settings` already accepts
+extra fields on creation).
+
 ## Local development
 
 ```bash

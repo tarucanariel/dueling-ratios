@@ -3573,3 +3573,27 @@ button:focus-visible, input:focus-visible{
   .pt-rv-body{ padding:12px 12px 12px 14px; }
   .pt-rv-q{ font-size:1.1rem; }
 }
+
+/* =========================================================
+   Ratio Dash — Practice Test question mode
+   (the host picked "Practice Test items": the tile pool and fraction board
+   give way to one multiple-choice question at a time)
+   ========================================================= */
+.dash-question{ display:none; max-width:560px; margin:0 auto; }
+.game-wrap.dash-practice .dash-question{ display:block; }
+.game-wrap.dash-practice .problem-strip,
+.game-wrap.dash-practice .pool-sidebar{ display:none; }
+
+.dash-q-label{
+  margin:0 0 6px;
+  font-size:0.72rem; font-weight:700; letter-spacing:0.09em; text-transform:uppercase;
+  color:var(--amber);
+}
+.dash-question .pt-prompt{ margin-bottom:14px; }
+
+/* After an answer: the right option turns green, a wrong pick red. */
+.pt-option.correct{ border-color:var(--good); background:rgba(0,255,136,0.12); }
+.pt-option.correct .pt-letter{ background:var(--good); color:#06210f; }
+.pt-option.wrong{ border-color:var(--bad); background:rgba(255,51,102,0.12); }
+.pt-option.wrong .pt-letter{ background:var(--bad); color:#fff; }
+.dash-question.locked .pt-option{ pointer-events:none; }
