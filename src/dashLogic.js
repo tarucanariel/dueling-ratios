@@ -110,3 +110,56 @@ export function sortStandings(playersObj, winnerUid){
 export function isRaceOver(race){
   return !!race && (race.status === 'completed' || !!race.winnerUid);
 }
+
+/* ---------- Player and bot entries ----------
+   Shared by the Firebase layer (dashRace.js) and the offline in-memory
+   one (dashLocalRace.js), so both build identical race objects. */
+
+export function randomAvatarSeed(){
+  return Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+}
+
+export function buildPlayerEntry(uid, name){
+  return {
+    uid,
+    name,
+    avatarSeed: randomAvatarSeed(),
+    joinedAt: Date.now(),
+    position: 0,
+    correctCount: 0,
+    wrongCount: 0,
+    finished: false,
+    connected: true,
+  };
+}
+
+export const BOT_NAMES = ["Ying", "Guillermo", "Merlie", "Romel", "Divino", "Chatt", "Zan", "Oding", "Rycanz"];
+
+/* A fresh random order of the bot names for each race, so a host adding
+   3 bots doesn't always get the same 3. */
+export function shuffledBotNames(){
+  const names = [...BOT_NAMES];
+  for(let i = names.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [names[i], names[j]] = [names[j], names[i]];
+  }
+  return names;
+}
+
+/* A bot is a normal player entry the host's client plays (see
+   startDashBots in main.js). Its uid has the form "bot1", "bot2", ... —
+   the database rules let only the host write those entries. */
+export function buildBotEntry(index, name){
+  return {
+    uid: "bot" + (index + 1),
+    name: "\u{1F916} " + name,
+    avatarSeed: "bot-" + name,
+    isBot: true,
+    joinedAt: Date.now() + index + 1,
+    position: 0,
+    correctCount: 0,
+    wrongCount: 0,
+    finished: false,
+    connected: true,
+  };
+}

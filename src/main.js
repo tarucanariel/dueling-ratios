@@ -11,6 +11,7 @@ import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectU
 import { isResultTie } from './results.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, listenToAllRaces, pruneStaleRaces, rejoinRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
+import { createLocalDashBackend } from './dashLocalRace.js';
 import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, humanCount, isCompetitiveRace, isRaceStale, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
 import { avatarUrlForPlayer } from './dashAvatar.js';
 import { initPracticeUI, closePracticeTest } from './practiceUI.js';
@@ -117,6 +118,7 @@ const el = {
   stepDashChoice: document.getElementById('step-dash-choice'),
   dashHostBtn: document.getElementById('dash-host-btn'),
   dashJoinBtn: document.getElementById('dash-join-btn'),
+  dashOfflineBtn: document.getElementById('dash-offline-btn'),
   stepDashLength: document.getElementById('step-dash-length'),
   stepDashPenalty: document.getElementById('step-dash-penalty'),
   stepDashBots: document.getElementById('step-dash-bots'),
@@ -1980,6 +1982,7 @@ function selectMode(mode){
   state.dashChoice = null;
   el.dashHostBtn.classList.remove('selected');
   el.dashJoinBtn.classList.remove('selected');
+  el.dashOfflineBtn.classList.remove('selected');
   closeLobby(); // leaving/changing mode — stop listening if we were browsing the lobby
   stopWatchingChallenge(); // ...and stop watching a pending challenge, if one was in flight
   el.modeSolo.classList.toggle('selected', mode === 'solo');
@@ -2033,7 +2036,7 @@ function updateStepVisibility(){
   // Ratio Dash hosts pick operations, negatives, race length and the
   // wrong-answer setback — a race has no timer or pair count.
   const showHostSettings = (mode === 'solo' || mode === 'vs' || mode === 'computer') || (mode === 'online' && onlineChoice === 'create');
-  const showDashSettings = mode === 'dash' && dashChoice === 'host';
+  const showDashSettings = mode === 'dash' && (dashChoice === 'host' || dashChoice === 'offline');
   // A race can ask fraction operations (the operations/negatives settings
   // apply) or Practice Test items (topics and difficulty apply instead).
   const dashPractice = showDashSettings && state.dashQuestionSet === 'practice';
@@ -2053,7 +2056,9 @@ function updateStepVisibility(){
   const botCount = parseInt(el.dashBotsSelect.value, 10) || 0;
   el.stepDashBotSkill.classList.toggle('hidden', !(showDashSettings && botCount > 0));
   const humanSlots = DASH_MAX_PLAYERS - 1 - botCount; // besides the host
-  el.dashBotsNote.textContent = botCount === 0
+  el.dashBotsNote.textContent = dashChoice === 'offline'
+    ? 'Offline practice: just you against the computer racers. Needs no internet.'
+    : botCount === 0
     ? 'Bots take up racer slots, leaving fewer for other players.'
     : humanSlots === 0
       ? 'Full house of bots \u2014 no other players can join.'
@@ -2067,7 +2072,7 @@ function updateStepVisibility(){
   const ready = mode === 'solo' || mode === 'vs' || mode === 'computer' || (mode === 'online' && onlineChoice && onlineChoice !== 'find') || (mode === 'dash' && !!dashChoice);
   el.startBtn.classList.toggle('hidden', !ready);
   if(mode === 'dash'){
-    el.startBtn.textContent = dashChoice === 'join' ? 'Join Race' : 'Create Race';
+    el.startBtn.textContent = dashChoice === 'join' ? 'Join Race' : dashChoice === 'offline' ? 'Start Practice Race' : 'Create Race';
   } else if(mode === 'online'){
     el.startBtn.textContent = onlineChoice === 'join' ? 'Join Room' : 'Create Room';
   } else {
@@ -2077,7 +2082,7 @@ function updateStepVisibility(){
 
 function handlePrimaryButtonClick(){
   if(state.mode === 'dash'){
-    if(state.dashChoice === 'host') handleDashHost();
+    if(state.dashChoice === 'host' || state.dashChoice === 'offline') handleDashHost();
     else if(state.dashChoice === 'join') handleDashJoin();
     return;
   }
@@ -2189,6 +2194,7 @@ function resetToSetup(){
   state.dashChoice = null;
   el.dashHostBtn.classList.remove('selected');
   el.dashJoinBtn.classList.remove('selected');
+  el.dashOfflineBtn.classList.remove('selected');
   el.joinCodeInput.value = '';
   updateStepVisibility();
 }
@@ -5417,10 +5423,21 @@ const DASH_LANE_MIN_PX = 22;           // smallest lane (full room on a short sc
 const DASH_LANE_MAX_PX = 44;           // roomiest lane (few players)
 const DASH_SPECTATE_TRACK = { share: 0.42, maxPx: 400 }; // a teacher's view has no board, so the track can be taller
 
+/* Which race backend the current Ratio Dash session talks to. Normally the
+   Firebase one (dashRace.js); an "offline practice" race uses the in-memory
+   one (dashLocalRace.js), which needs no internet. Set when a race is
+   created or joined, and read by every call below that touches the race. */
+const onlineDash = { createRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace };
+const localDash = createLocalDashBackend({ now: serverNow });
+let dashBackend = onlineDash;
+
 function selectDashChoice(choice){
   state.dashChoice = choice;
   el.dashHostBtn.classList.toggle('selected', choice === 'host');
   el.dashJoinBtn.classList.toggle('selected', choice === 'join');
+  el.dashOfflineBtn.classList.toggle('selected', choice === 'offline');
+  // An offline race is you against computer racers, so it needs at least one.
+  if(choice === 'offline' && !(parseInt(el.dashBotsSelect.value, 10) > 0)) el.dashBotsSelect.value = '3';
   el.setupError.textContent = '';
   updateStepVisibility();
 }
@@ -5439,6 +5456,7 @@ el.dashDifficultyBtns.forEach((btn) => {
   });
 });
 el.dashJoinBtn.addEventListener('click', () => selectDashChoice('join'));
+el.dashOfflineBtn.addEventListener('click', () => selectDashChoice('offline'));
 
 async function handleDashHost(){
   const name = getMyName();
@@ -5472,17 +5490,25 @@ async function handleDashHost(){
     questionSettings = { questionSet: 'fractions', allowedOps: selectedOps, allowNegatives: el.allowNegatives.checked };
   }
 
+  const offline = state.dashChoice === 'offline';
+  const botCount = parseInt(el.dashBotsSelect.value, 10) || 0;
+  if(offline && botCount < 1){
+    el.setupError.textContent = 'An offline race needs at least one computer racer.';
+    return;
+  }
+
   el.startBtn.disabled = true;
   el.setupError.textContent = '';
   try{
-    const { code, uid } = await createRace(name, {
+    dashBackend = offline ? localDash : onlineDash;
+    const { code, uid } = await dashBackend.createRace(name, {
       ...questionSettings,
       trackLength: parseInt(el.dashLengthSelect.value, 10),
       wrongStepBack: parseInt(el.dashPenaltySelect.value, 10),
-      botCount: parseInt(el.dashBotsSelect.value, 10) || 0,
+      botCount,
       botSkill: el.dashBotSkillSelect.value,
     });
-    enterDash(code, uid, true);
+    enterDash(code, uid, true, { offline });
   } catch (err){
     el.setupError.textContent = 'Could not create a race. Please try again.';
     console.error(err);
@@ -5506,6 +5532,7 @@ async function handleDashJoin(){
   el.startBtn.disabled = true;
   el.setupError.textContent = '';
   try{
+    dashBackend = onlineDash;
     const result = await joinRace(code, name);
     if(!result.ok){
       el.setupError.textContent = result.message;
@@ -5520,11 +5547,12 @@ async function handleDashJoin(){
   }
 }
 
-function enterDash(code, uid, isHost, { rejoin = false } = {}){
+function enterDash(code, uid, isHost, { rejoin = false, offline = false } = {}){
   cleanupDash();
   state.mode = 'dash';
   const d = state.dash = {
     code, uid, isHost,
+    offline,             // in-memory practice race: no Firebase, no saved seat, no stats
     race: null,          // latest snapshot
     started: false,      // race UI built for this session
     ending: false,       // end-of-race sequence kicked off
@@ -5537,7 +5565,7 @@ function enterDash(code, uid, isHost, { rejoin = false } = {}){
     waitTimer: null,
     resultsTimer: null,
     unsub: null,
-    presence: trackDashPresence(code, uid, isHost, { started: rejoin }),
+    presence: dashBackend.trackDashPresence(code, uid, isHost, { started: rejoin }),
     trackLength: DASH_TRACK_LENGTH,        // the real values come from the race's settings
     wrongStepBack: DASH_WRONG_STEP_BACK,   // when the race UI starts (startDashRaceUI)
     questionSet: 'fractions', // 'practice' once the race UI starts for a Practice Test race
@@ -5559,7 +5587,7 @@ function enterDash(code, uid, isHost, { rejoin = false } = {}){
   el.dashRoomCode.textContent = code;
   // A rejoining player goes straight back to the track, not the lobby.
   if(!rejoin) el.dashLobbyModal.classList.remove('hidden');
-  d.unsub = listenToRace(code, onDashUpdate);
+  d.unsub = dashBackend.listenToRace(code, onDashUpdate);
 }
 
 /* Reconnect: a player whose tab closed or reloaded mid-race gets their
@@ -5568,6 +5596,7 @@ function enterDash(code, uid, isHost, { rejoin = false } = {}){
 async function attemptDashRejoin(seat){
   el.rejoinBtn.disabled = true;
   try{
+    dashBackend = onlineDash;
     const result = await rejoinRace(seat.code);
     if(!result.ok){
       clearSeat();
@@ -5621,7 +5650,7 @@ function leaveDash(){
   const d = state.dash;
   if(d){
     recordDashStats(d.race); // a race left midway still counts the answers given
-    leaveRace(d.code, d.uid, {
+    dashBackend.leaveRace(d.code, d.uid, {
       isHost: d.isHost,
       status: d.race ? d.race.status : 'waiting',
       raceOver: isRaceOver(d.race),
@@ -5640,7 +5669,7 @@ el.dashStartBtn.addEventListener('click', async () => {
   if(!d) return;
   el.dashStartBtn.disabled = true;
   try{
-    await startRace(d.code);
+    await dashBackend.startRace(d.code);
   } catch (err){
     console.error('Failed to start Ratio Dash race:', err);
     el.dashLobbyStatus.textContent = 'Could not start the race. Please try again.';
@@ -5659,6 +5688,7 @@ async function recordDashStats(race){
   const d = state.dash;
   if(!d || d.statsRecorded || !d.started) return;
   d.statsRecorded = true;
+  if(d.offline) return; // practice races against bots are never saved
   if(!state.googleUser || state.googleUser.uid !== d.uid) return;
 
   const correct = d.correctCount;
@@ -5701,7 +5731,7 @@ function handleDashWaitTimeout(){
   const d = state.dash;
   if(!d) return;
   d.waitTimer = null;
-  deleteRace(d.code).catch(() => {});
+  dashBackend.deleteRace(d.code).catch(() => {});
   resetToSetup();
   el.setupError.textContent = 'No one started the race within 10 minutes, so it was cancelled.';
 }
@@ -5748,8 +5778,8 @@ function tickDashBots(){
       wrongCount: (bot.wrongCount || 0) + (correct ? 0 : 1),
     };
     const write = progress.position >= d.trackLength
-      ? finishRace(d.code, bot.uid, progress)
-      : reportProgress(d.code, bot.uid, progress);
+      ? dashBackend.finishRace(d.code, bot.uid, progress)
+      : dashBackend.reportProgress(d.code, bot.uid, progress);
     write.catch((err) => console.error('Failed to move Ratio Dash bot:', err));
   });
 }
@@ -5770,7 +5800,7 @@ function onDashUpdate(race){
 
   // While racing, keep the saved seat's timestamp current so "last
   // confirmed connected" is accurate for the 10-minute rejoin window.
-  if(d.started && !isRaceOver(race) && Date.now() - d.seatSavedAt > 5000){
+  if(!d.offline && d.started && !isRaceOver(race) && Date.now() - d.seatSavedAt > 5000){
     d.seatSavedAt = Date.now();
     const me = race.players && race.players[d.uid];
     saveSeat(d.code, 'dash', me ? me.name : '', 'dash');
@@ -6165,10 +6195,10 @@ function handleDashTileClick(tileId){
     // Crossed the line — input stays locked; the listener ends the race.
     d.finishing = true;
     el.feedbackLine.textContent = '\u{1F3C1} You crossed the finish line!';
-    finishRace(d.code, d.uid, progress).catch((err) => console.error('Failed to record Ratio Dash finish:', err));
+    dashBackend.finishRace(d.code, d.uid, progress).catch((err) => console.error('Failed to record Ratio Dash finish:', err));
     return;
   }
-  reportProgress(d.code, d.uid, progress).catch((err) => console.error('Failed to report Ratio Dash progress:', err));
+  dashBackend.reportProgress(d.code, d.uid, progress).catch((err) => console.error('Failed to report Ratio Dash progress:', err));
 
   if(isCorrect && state.cellIndex + 1 >= state.cells.length){
     state.cellIndex++;
@@ -6262,10 +6292,10 @@ function handleDashAnswer(choice){
     // Crossed the line — input stays locked; the listener ends the race.
     d.finishing = true;
     el.feedbackLine.textContent = '\u{1F3C1} You crossed the finish line!';
-    finishRace(d.code, d.uid, progress).catch((err) => console.error('Failed to record Ratio Dash finish:', err));
+    dashBackend.finishRace(d.code, d.uid, progress).catch((err) => console.error('Failed to record Ratio Dash finish:', err));
     return;
   }
-  reportProgress(d.code, d.uid, progress).catch((err) => console.error('Failed to report Ratio Dash progress:', err));
+  dashBackend.reportProgress(d.code, d.uid, progress).catch((err) => console.error('Failed to report Ratio Dash progress:', err));
 
   setTimeout(() => {
     if(state.dash === d && !d.ending) showDashQuestion();
@@ -6300,7 +6330,7 @@ function startDashSpectating(code){
   el.dashSpecPanel.classList.remove('hidden');
   el.dashProgress.textContent = '';
 
-  spec.unsub = listenToRace(code, onDashSpecUpdate);
+  spec.unsub = onlineDash.listenToRace(code, onDashSpecUpdate);
 }
 
 function onDashSpecUpdate(race){

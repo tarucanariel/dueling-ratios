@@ -40,6 +40,16 @@ badges. They do not feed operation-mastery stats or the Practice Test
 badges. No new database rules were needed (`settings` already accepts
 extra fields on creation).
 
+### Offline practice race (no internet)
+
+Choosing **Practice vs Bots (offline)** on the Ratio Dash screen runs a race
+entirely on the device: one student against 1-9 computer racers, with either
+question set. The race lives in memory (`src/dashLocalRace.js`, same function
+names as `dashRace.js`; `main.js` picks the backend in `dashBackend`), so it
+needs no Firebase, no sign-in and no room code. Nothing is saved: no stats,
+badges or rejoin seat. Joining or hosting a normal race still needs internet.
+Tests: `src/dashLocalRace.test.js`.
+
 ## Local development
 
 ```bash

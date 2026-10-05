@@ -23,7 +23,7 @@
 
 import { ref, set, get, update, remove, onValue, off, onDisconnect, serverTimestamp, runTransaction } from "firebase/database";
 import { db, auth, ensureSignedIn } from "./firebase.js";
-import { DASH_MAX_PLAYERS, DASH_MAX_BOTS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, isRaceOver, isRaceStale } from "./dashLogic.js";
+import { DASH_MAX_PLAYERS, DASH_MAX_BOTS, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, isRaceOver, isRaceStale, buildPlayerEntry, buildBotEntry, shuffledBotNames } from "./dashLogic.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I, same as online.js
 export const DASH_CODE_LENGTH = 4;
@@ -35,55 +35,6 @@ function generateCode(){
     code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
   }
   return code;
-}
-
-function randomAvatarSeed(){
-  return Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
-}
-
-function buildPlayerEntry(uid, name){
-  return {
-    uid,
-    name,
-    avatarSeed: randomAvatarSeed(),
-    joinedAt: Date.now(),
-    position: 0,
-    correctCount: 0,
-    wrongCount: 0,
-    finished: false,
-    connected: true,
-  };
-}
-
-const BOT_NAMES = ["Ying", "Guillermo", "Merlie", "Romel", "Divino", "Chatt", "Zan", "Oding", "Rycanz"];
-
-/* A fresh random order of the bot names for each race, so a host adding
-   3 bots doesn't always get the same 3. */
-function shuffledBotNames(){
-  const names = [...BOT_NAMES];
-  for(let i = names.length - 1; i > 0; i--){
-    const j = Math.floor(Math.random() * (i + 1));
-    [names[i], names[j]] = [names[j], names[i]];
-  }
-  return names;
-}
-
-/* A bot is a normal player entry the host's client plays (see
-   startDashBots in main.js). Its uid has the form "bot1", "bot2", ... —
-   the database rules let only the host write those entries. */
-function buildBotEntry(index, name){
-  return {
-    uid: "bot" + (index + 1),
-    name: "\u{1F916} " + name,
-    avatarSeed: "bot-" + name,
-    isBot: true,
-    joinedAt: Date.now() + index + 1,
-    position: 0,
-    correctCount: 0,
-    wrongCount: 0,
-    finished: false,
-    connected: true,
-  };
 }
 
 const raceRef = (code) => ref(db, "dashRaces/" + code);
