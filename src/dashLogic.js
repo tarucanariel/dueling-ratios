@@ -133,7 +133,7 @@ export function buildPlayerEntry(uid, name){
   };
 }
 
-export const BOT_NAMES = ["Ying", "Guillermo", "Merlie", "Romel", "Divino", "Chatt", "Zan", "Oding", "Rycanz"];
+export const BOT_NAMES = ["Ying", "Guiller", "Merlie", "Romel", "Divz", "Chatt", "Zan", "Oding", "Rycanz"];
 
 /* A fresh random order of the bot names for each race, so a host adding
    3 bots doesn't always get the same 3. */
