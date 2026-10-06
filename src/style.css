@@ -2891,6 +2891,8 @@ button:focus-visible, input:focus-visible{
     color:#ffffff; /* blank — nothing to show, this just avoids a stray "?" */
   }
 
+  .ws-sheet + .ws-sheet{ page-break-before:always; break-before:page; }
+  .ws-answer-sheet{ break-inside:avoid; page-break-inside:avoid; margin-bottom:18px; }
   .ws-answer-key{ page-break-before:always; break-before:page; }
   .ws-answer-key h2{ color:#111111; font-size:1.1rem; }
   .ws-answer-item{ color:#222222; font-size:0.82rem; margin-bottom:5px; }

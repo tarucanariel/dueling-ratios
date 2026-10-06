@@ -228,6 +228,13 @@
       </label>
     </div>
 
+    <div class="setup-step" id="step-similar">
+      <label class="checkbox-item">
+        <input type="checkbox" id="allow-similar" checked>
+        Include similar fractions (uncheck for dissimilar only, in addition/subtraction)
+      </label>
+    </div>
+
     <div class="setup-step" id="step-pair-count">
       <label for="pair-count-select">How many fractions do you want to solve?</label>
       <select id="pair-count-select">
@@ -616,6 +623,13 @@
     </div>
 
     <div class="setup-step">
+      <label class="checkbox-item">
+        <input type="checkbox" id="ws-allow-similar" checked>
+        Include similar fractions (uncheck for dissimilar only, in addition/subtraction)
+      </label>
+    </div>
+
+    <div class="setup-step">
       <label for="ws-problem-count">How many problems?</label>
       <select id="ws-problem-count">
         <option value="1">1</option>
@@ -629,6 +643,18 @@
         <option value="9">9</option>
         <option value="10">10</option>
       </select>
+    </div>
+
+    <div class="setup-step">
+      <label for="ws-sheet-count">How many worksheets? (one per student, each with different problems)</label>
+      <input type="number" id="ws-sheet-count" min="1" max="60" value="1" inputmode="numeric">
+    </div>
+
+    <div class="setup-step">
+      <label class="checkbox-item">
+        <input type="checkbox" id="ws-include-key" checked>
+        Include answer key
+      </label>
     </div>
 
     <p class="setup-error" id="ws-error"></p>

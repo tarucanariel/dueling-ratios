@@ -35,6 +35,7 @@ const state = {
   pool: [],             // current tile pool [{id, value}]
   allowedOps: ['+', '-', '\u00D7', '\u00F7'], // operations the player opted into
   allowNegatives: false, // whether generated numerators can be negative
+  allowSimilar: true,    // false = "+"/"-" problems always use dissimilar denominators
   inputLocked: false,   // prevents a single tap from being processed twice
   timeControlSeconds: 0, // 0 = no timer (local modes only — not yet supported online)
   timerId: null,         // setInterval handle
@@ -175,6 +176,8 @@ const el = {
 
   stepOperations: document.getElementById('step-operations'),
   stepNegatives: document.getElementById('step-negatives'),
+  stepSimilar: document.getElementById('step-similar'),
+  allowSimilar: document.getElementById('allow-similar'),
   stepPairCount: document.getElementById('step-pair-count'),
   stepTimeControl: document.getElementById('step-time-control'),
 
@@ -334,6 +337,9 @@ const el = {
   wsOpChoices: document.querySelectorAll('.ws-op-choice'),
   wsAllowNegatives: document.getElementById('ws-allow-negatives'),
   wsProblemCount: document.getElementById('ws-problem-count'),
+  wsAllowSimilar: document.getElementById('ws-allow-similar'),
+  wsSheetCount: document.getElementById('ws-sheet-count'),
+  wsIncludeKey: document.getElementById('ws-include-key'),
   wsError: document.getElementById('ws-error'),
   wsGenerateBtn: document.getElementById('ws-generate-btn'),
   wsCloseBtn: document.getElementById('ws-close-btn'),
@@ -1334,12 +1340,18 @@ function wsProblemHTML(problem, layout, index){
   return html;
 }
 
-function wsAnswerKeyHTML(entries){
+/* One answer key section per worksheet, all after the last worksheet,
+   so the teacher can print the student pages and the key pages apart. */
+function wsAnswerKeyHTML(sheets){
   let html = `<div class="ws-answer-key">`;
-  html += `<h2>Answer Key</h2>`;
-  entries.forEach((entry, i) => {
-    const parts = entry.layout.cells.map(c => `${c.label}: ${c.correct}`).join(' \u00B7 ');
-    html += `<div class="ws-answer-item"><strong>${i + 1}.</strong> ${parts}</div>`;
+  sheets.forEach((entries, s) => {
+    html += `<div class="ws-answer-sheet">`;
+    html += `<h2>Answer Key${sheets.length > 1 ? ` &mdash; Worksheet ${s + 1}` : ''}</h2>`;
+    entries.forEach((entry, i) => {
+      const parts = entry.layout.cells.map(c => `${c.label}: ${c.correct}`).join(' \u00B7 ');
+      html += `<div class="ws-answer-item"><strong>${i + 1}.</strong> ${parts}</div>`;
+    });
+    html += `</div>`;
   });
   html += `</div>`;
   return html;
@@ -1354,22 +1366,35 @@ function handleGenerateWorksheet(){
   }
   const allowNegatives = el.wsAllowNegatives.checked;
   const count = parseInt(el.wsProblemCount.value, 10);
-
-  const entries = [];
-  for(let i = 0; i < count; i++){
-    const problem = generateProblem({ allowedOps: selectedOps, allowNegatives });
-    const layout = buildProblemLayout(problem);
-    entries.push({ problem, layout });
+  const sheetCount = parseInt(el.wsSheetCount.value, 10);
+  if(!Number.isInteger(sheetCount) || sheetCount < 1 || sheetCount > 60){
+    el.wsError.textContent = 'Number of worksheets must be between 1 and 60.';
+    return;
   }
 
-  let html = `<div class="ws-header">
-    <h1>AAT's Dueling Ratios &mdash; Practice Worksheet</h1>
+  const sheets = [];
+  for(let s = 0; s < sheetCount; s++){
+    const entries = [];
+    for(let i = 0; i < count; i++){
+      const problem = generateProblem({ allowedOps: selectedOps, allowNegatives, allowSimilar: el.wsAllowSimilar.checked });
+      const layout = buildProblemLayout(problem);
+      entries.push({ problem, layout });
+    }
+    sheets.push(entries);
+  }
+
+  let html = '';
+  sheets.forEach((entries, s) => {
+    html += `<div class="ws-sheet">`;
+    html += `<div class="ws-header">
+    <h1>AAT's Dueling Ratios &mdash; Practice Worksheet${sheetCount > 1 ? ` #${s + 1}` : ''}</h1>
     <div class="ws-header-fields"><span>Name: ________________________</span><span>Date: ____________</span></div>
   </div>`;
-  html += `<div class="ws-problems">`;
-  entries.forEach((entry, i) => { html += wsProblemHTML(entry.problem, entry.layout, i); });
-  html += `</div>`;
-  html += wsAnswerKeyHTML(entries);
+    html += `<div class="ws-problems">`;
+    entries.forEach((entry, i) => { html += wsProblemHTML(entry.problem, entry.layout, i); });
+    html += `</div></div>`;
+  });
+  if(el.wsIncludeKey.checked) html += wsAnswerKeyHTML(sheets);
 
   el.worksheetPrintRoot.innerHTML = html;
   el.worksheetModal.classList.add('hidden');
@@ -2042,6 +2067,7 @@ function updateStepVisibility(){
   const dashPractice = showDashSettings && state.dashQuestionSet === 'practice';
   el.stepOperations.classList.toggle('hidden', !(showHostSettings || (showDashSettings && !dashPractice)));
   el.stepNegatives.classList.toggle('hidden', !(showHostSettings || (showDashSettings && !dashPractice)));
+  el.stepSimilar.classList.toggle('hidden', !(showHostSettings || (showDashSettings && !dashPractice)));
   el.stepDashQuestions.classList.toggle('hidden', !showDashSettings);
   el.stepDashTopics.classList.toggle('hidden', !dashPractice);
   el.stepDashDifficulty.classList.toggle('hidden', !dashPractice);
@@ -2120,6 +2146,7 @@ function tryStartGame(){
   }
   state.allowedOps = selectedOps;
   state.allowNegatives = el.allowNegatives.checked;
+  state.allowSimilar = el.allowSimilar.checked;
 
   state.timeControlSeconds = parseInt(el.timeControlSelect.value, 10);
 
@@ -2246,6 +2273,7 @@ async function handleCreateGame(){
     allowedOps: selectedOps,
     totalPairs: parseInt(el.pairCountSelect.value, 10),
     allowNegatives: el.allowNegatives.checked,
+    allowSimilar: el.allowSimilar.checked,
     timeControlSeconds: parseInt(el.timeControlSelect.value, 10),
   };
 
@@ -3702,7 +3730,7 @@ function tickSpectatorTimer(){
 function startNextPair(){
   state.pairIndex++;
   if(state.pairIndex > 1) playSound('next'); // the first pair is covered by the start sound instead
-  state.problem = generateProblem({ allowedOps: state.allowedOps, allowNegatives: state.allowNegatives });
+  state.problem = generateProblem({ allowedOps: state.allowedOps, allowNegatives: state.allowNegatives, allowSimilar: state.allowSimilar !== false });
   state.layout = buildProblemLayout(state.problem);
   state.cells = state.layout.cells;
   state.cellIndex = 0;
@@ -5487,7 +5515,7 @@ async function handleDashHost(){
       el.setupError.textContent = 'Please select at least one operation to practice.';
       return;
     }
-    questionSettings = { questionSet: 'fractions', allowedOps: selectedOps, allowNegatives: el.allowNegatives.checked };
+    questionSettings = { questionSet: 'fractions', allowedOps: selectedOps, allowNegatives: el.allowNegatives.checked, allowSimilar: el.allowSimilar.checked };
   }
 
   const offline = state.dashChoice === 'offline';
@@ -5917,6 +5945,7 @@ function startDashRaceUI(race){
   }
   state.allowedOps = race.settings.allowedOps || [];
   state.allowNegatives = !!race.settings.allowNegatives;
+  state.allowSimilar = race.settings.allowSimilar !== false; // older races predate the option
   state.timeControlSeconds = 0;
   state.totalPairs = Number.MAX_SAFE_INTEGER; // a race has no pair limit — only the finish line ends it
   state.pairIndex = 0;

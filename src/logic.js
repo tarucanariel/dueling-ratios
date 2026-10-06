@@ -171,9 +171,10 @@ export function randNumerator(allowNegatives){
 // 70/30 isn't right for a given class — 0.5 would be back to an even split.
 const DISSIMILAR_CHANCE = 0.7;
 
-/* opts: { allowedOps: ['+','-','×','÷'], allowNegatives: bool } */
+/* opts: { allowedOps: ['+','-','×','÷'], allowNegatives: bool,
+           allowSimilar?: bool (default true; false = "+"/"-" are always dissimilar) } */
 export function generateProblem(opts){
-  const { allowedOps, allowNegatives } = opts;
+  const { allowedOps, allowNegatives, allowSimilar = true } = opts;
   const op = allowedOps[randInt(0, allowedOps.length - 1)];
 
   let a, b, c, d;
@@ -187,7 +188,7 @@ export function generateProblem(opts){
     // (1 - DISSIMILAR_CHANCE) (30%) similar — not just on average, but
     // as an exact per-draw probability, same guarantee as the original
     // 50/50 coin flip had.
-    const wantDissimilar = Math.random() < DISSIMILAR_CHANCE;
+    const wantDissimilar = !allowSimilar || Math.random() < DISSIMILAR_CHANCE;
     d = wantDissimilar
       ? (() => { let x; do { x = randInt(1, 9); } while(x === b); return x; })()
       : b;
