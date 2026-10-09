@@ -30,7 +30,11 @@ export const TILE_EFFECTS = [
   // a technique on the fly", matching a shadow clone's whole premise
   // of throwing out a quick decoy rather than one slow, careful throw.
   { id: 'kage-bunshin',   name: 'Kage Bunshin',    icon: '\uD83D\uDC65', unlockBadgeIds: ['quick-thinker', 'multiplication-mastery'] },
-  { id: 'bankai',         name: 'Bankai',          icon: '\uD83D\uDDE1\uFE0F', unlockBadgeIds: ['speed-master'] },
+  // Domain Expansion ("Infinite Void") — a two-badge unlock: Dedicated
+  // (100 games, the "infinite" practice) plus Perfect Game (a flawless
+  // result), so it reads as endless practice paying off cleanly.
+  { id: 'domain-expansion', name: 'Domain Expansion', icon: '🤞', unlockBadgeIds: ['persistence-100', 'perfect-game'] },
+  { id: 'bankai',         name: 'Bankai',         icon: '\uD83D\uDDE1\uFE0F', unlockBadgeIds: ['speed-master'] },
   // The only two-badge unlocks in the roster on purpose — Gear 5 and
   // Ultra Instinct are meant to read as the roster's capstones, each
   // demanding two hard badges together rather than one more single

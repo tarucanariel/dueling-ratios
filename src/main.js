@@ -3961,6 +3961,7 @@ function announceGameStart(effectId){
   playStartSound(effectId);
   if(effectId === 'bankai') spawnBankaiPowerUpCard();
   if(effectId === 'gear-5') spawnGear5PowerUpCard();
+  if(effectId === 'domain-expansion') spawnDomainExpansionCard();
 }
 
 /* Applies a persistent, ambient board theme (border glow, background
@@ -4501,6 +4502,19 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     ];
     duration = 400;
     easing = 'ease-in';
+  } else if(effectId === 'domain-expansion'){
+    // The tile is pulled into "the void": a short hang at the launch
+    // point (the domain forming), then a straight, accelerating pull
+    // that glows cyan-violet before collapsing to a point. The landing
+    // ripple (spawnVoidRipple() below) completes the beat.
+    keyframes = [
+      { transform: 'translate(0,0) scale(1)', filter: 'brightness(1) drop-shadow(0 0 0px #7df9ff)', opacity: 1, offset: 0 },
+      { transform: 'translate(0,0) scale(1.15)', filter: 'brightness(1.6) drop-shadow(0 0 14px #7df9ff)', opacity: 1, offset: 0.2 },
+      { transform: `translate(${dx * 0.7}px, ${dy * 0.7}px) scale(0.8)`, filter: 'brightness(2.2) drop-shadow(0 0 22px #b388ff)', opacity: 1, offset: 0.75 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.05)`, filter: 'brightness(3) drop-shadow(0 0 0px #7df9ff)', opacity: 0, offset: 1 },
+    ];
+    duration = 420;
+    easing = 'cubic-bezier(0.5, 0, 0.9, 0.5)';
   } else { // 'classic' (also the fallback for any unrecognized effect id)
     keyframes = [
       { transform: 'translate(0,0) scale(1)', offset: 0 },
@@ -4562,7 +4576,73 @@ function animateTileThrow(tileEl, targetEl, variant, isMyTurn, effectIdOverride)
     const landY = endRect.top + endRect.height / 2;
     spawnKageBunshinClones(startRect, dx, dy, clone.textContent, computed.fontSize, duration);
     anim.onfinish = () => { clone.remove(); spawnKageBunshinPoof(landX, landY); };
+  } else if(effectId === 'domain-expansion'){
+    const landX = endRect.left + endRect.width / 2;
+    const landY = endRect.top + endRect.height / 2;
+    anim.onfinish = () => { clone.remove(); spawnVoidRipple(landX, landY); };
   }
+}
+
+/* Domain Expansion's landing flourish — two concentric rings expand
+   from the landing point and fade, the "domain" briefly claiming that
+   spot of the board. Purely cosmetic and self-removing. */
+function spawnVoidRipple(x, y){
+  [0, 90].forEach((delay) => {
+    const ring = document.createElement('div');
+    ring.className = 'void-ripple';
+    ring.style.left = `${x}px`;
+    ring.style.top = `${y}px`;
+    document.body.appendChild(ring);
+    const anim = ring.animate([
+      { transform: 'translate(-50%,-50%) scale(0.2)', opacity: 0.95 },
+      { transform: 'translate(-50%,-50%) scale(1)', opacity: 0 },
+    ], { duration: 520, delay, easing: 'ease-out', fill: 'backwards' });
+    anim.onfinish = () => ring.remove();
+  });
+}
+
+/* Domain Expansion's game-start flourish — "DOMAIN EXPANSION / Infinite
+   Void" card. A cyan-white shockwave ring expands from screen center
+   while the backdrop floods from white to deep void-blue, the text
+   snaps in with a hard scale-down, holds, then the whole card fades.
+   Called from announceGameStart() so it stays in lockstep with the
+   start sound; click-through and self-removing like the other cards. */
+function spawnDomainExpansionCard(){
+  const card = document.createElement('div');
+  card.className = 'domain-card';
+  card.innerHTML =
+    '<span class="domain-ring"></span>' +
+    '<span class="domain-text">Domain Expansion</span>' +
+    '<span class="domain-sub">∞ Infinite Void ∞</span>';
+  document.body.appendChild(card);
+
+  const DURATION = 1500;
+  const anim = card.animate([
+    { opacity: 0, offset: 0 },
+    { opacity: 1, offset: 0.1 },
+    { opacity: 1, offset: 0.78 },
+    { opacity: 0, offset: 1 },
+  ], { duration: DURATION, easing: 'ease-out' });
+
+  card.querySelector('.domain-ring').animate([
+    { transform: 'translate(-50%,-50%) scale(0)', opacity: 1 },
+    { transform: 'translate(-50%,-50%) scale(1)', opacity: 0 },
+  ], { duration: 900, easing: 'cubic-bezier(0.1, 0.7, 0.3, 1)', fill: 'both' });
+
+  card.querySelector('.domain-text').animate([
+    { transform: 'scale(2.2)', filter: 'brightness(3) blur(6px)', opacity: 0, offset: 0 },
+    { transform: 'scale(1)', filter: 'brightness(1.4) blur(0)', opacity: 1, offset: 0.22 },
+    { transform: 'scale(1.03)', filter: 'brightness(1)', opacity: 1, offset: 1 },
+  ], { duration: DURATION, easing: 'ease-out' });
+
+  card.querySelector('.domain-sub').animate([
+    { opacity: 0, letterSpacing: '0.7em', offset: 0 },
+    { opacity: 0, letterSpacing: '0.7em', offset: 0.3 },
+    { opacity: 1, letterSpacing: '0.35em', offset: 0.55 },
+    { opacity: 1, letterSpacing: '0.35em', offset: 1 },
+  ], { duration: DURATION, easing: 'ease-out' });
+
+  anim.onfinish = () => card.remove();
 }
 
 /* Confetti Burst's landing flourish — a handful of small colored

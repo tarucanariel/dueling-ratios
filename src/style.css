@@ -2628,6 +2628,125 @@ body{
   50%{ box-shadow:0 0 0 2px rgba(76,175,80,0.55), 0 0 20px rgba(76,175,80,0.32); }
 }
 
+/* Domain Expansion ("Infinite Void") — cyan/white on deep void-blue
+   with a violet edge. Landing rings: spawnVoidRipple() in main.js. */
+.void-ripple{
+  position:fixed;
+  z-index:999;
+  width:90px;
+  height:90px;
+  border-radius:50%;
+  pointer-events:none;
+  border:2px solid #7df9ff;
+  box-shadow:0 0 14px rgba(125,249,255,0.8), inset 0 0 14px rgba(179,136,255,0.5);
+}
+
+/* Game-start card — spawnDomainExpansionCard() in main.js. */
+.domain-card{
+  position:fixed;
+  inset:0;
+  z-index:1000;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  pointer-events:none;
+  overflow:hidden;
+  background:radial-gradient(circle at 50% 50%, rgba(10,16,48,0.82) 0%, rgba(0,0,10,0.95) 80%);
+}
+
+.domain-ring{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:160vmax;
+  height:160vmax;
+  border-radius:50%;
+  border:6px solid #e0ffff;
+  box-shadow:0 0 60px 20px rgba(125,249,255,0.7), inset 0 0 80px 20px rgba(179,136,255,0.35);
+}
+
+.domain-text{
+  position:relative;
+  font-family:'Inter', sans-serif;
+  font-weight:800;
+  font-size:clamp(1.8rem, 8vw, 4rem);
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  color:#f2ffff;
+  text-shadow:
+    0 0 12px rgba(125,249,255,0.95),
+    0 0 34px rgba(125,249,255,0.7),
+    0 0 70px rgba(179,136,255,0.55);
+  white-space:nowrap;
+}
+
+.domain-sub{
+  position:relative;
+  font-family:'Inter', sans-serif;
+  font-weight:600;
+  font-size:clamp(0.9rem, 3.2vw, 1.4rem);
+  text-transform:uppercase;
+  color:#b9f3ff;
+  text-shadow:0 0 14px rgba(125,249,255,0.8);
+  white-space:nowrap;
+}
+
+/* Board theme — a cold cyan/violet pulse, slow and deep like a void
+   rather than a flaring aura. */
+.effect-theme-domain-expansion .problem-strip,
+.effect-theme-domain-expansion .pool-tray{
+  padding:14px;
+  border-radius:16px;
+  background-color:rgba(20,30,90,0.14);
+  animation:board-domain-pulse 3.2s ease-in-out infinite;
+}
+
+/* Black hole inside the board, behind the glowing boxes. .board-area
+   has its own solid background, so the hole lives on it (isolation
+   makes z-index:-1 land above that background but below the strip and
+   tray). ::before is the slowly rotating accretion ring, ::after the
+   dark core with a thin bright rim. Overflow is clipped to the board's
+   rounded corners. */
+.effect-theme-domain-expansion .board-area{
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+}
+
+.effect-theme-domain-expansion .board-area::before{
+  content:'';
+  position:absolute;
+  left:50%;
+  top:50%;
+  z-index:-1;
+  width:min(400px, 88%);
+  aspect-ratio:1;
+  border-radius:50%;
+  pointer-events:none;
+  /* Slowly swirling white-cyan smoke, no dark center. */
+  background:conic-gradient(from 0deg,
+    rgba(255,255,255,0) 0deg, rgba(235,252,255,0.5) 70deg,
+    rgba(200,185,255,0.45) 150deg, rgba(255,255,255,0) 230deg,
+    rgba(225,248,255,0.3) 300deg, rgba(255,255,255,0) 360deg);
+  -webkit-mask:radial-gradient(circle, #000 0 30%, transparent 70%);
+  mask:radial-gradient(circle, #000 0 30%, transparent 70%);
+  filter:blur(14px);
+  opacity:0.6;
+  transform:translate(-50%,-50%) rotate(0deg);
+  animation:black-hole-spin 28s linear infinite;
+}
+
+@keyframes black-hole-spin{
+  to{ transform:translate(-50%,-50%) rotate(360deg); }
+}
+
+@keyframes board-domain-pulse{
+  0%, 100%{ box-shadow:0 0 0 2px rgba(125,249,255,0.45), 0 0 14px rgba(125,249,255,0.25); }
+  50%{ box-shadow:0 0 0 2px rgba(179,136,255,0.6), 0 0 24px rgba(179,136,255,0.38); }
+}
+
 .feedback-line{
   text-align:center;
   min-height:1.4em;
