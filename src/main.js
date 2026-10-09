@@ -4630,8 +4630,8 @@ function spawnDomainExpansionCard(){
   ], { duration: 900, easing: 'cubic-bezier(0.1, 0.7, 0.3, 1)', fill: 'both' });
 
   card.querySelector('.domain-text').animate([
-    { transform: 'scale(2.2)', filter: 'brightness(3) blur(6px)', opacity: 0, offset: 0 },
-    { transform: 'scale(1)', filter: 'brightness(1.4) blur(0)', opacity: 1, offset: 0.22 },
+    { transform: 'scale(2.2)', filter: 'brightness(3)', opacity: 0, offset: 0 },
+    { transform: 'scale(1)', filter: 'brightness(1.4)', opacity: 1, offset: 0.22 },
     { transform: 'scale(1.03)', filter: 'brightness(1)', opacity: 1, offset: 1 },
   ], { duration: DURATION, easing: 'ease-out' });
 
