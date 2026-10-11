@@ -2778,7 +2778,85 @@ body{
   color:#cccccc;
   line-height:1.5;
   margin-bottom:22px;
-  white-space:pre-line;
+}
+
+/* Per-player result tiles: an accuracy ring around the score. */
+.result-board{
+  display:flex;
+  justify-content:center;
+  gap:14px;
+  margin:0 0 22px;
+}
+.result-tile{
+  position:relative;
+  flex:0 1 190px;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:4px;
+  padding:20px 10px 14px;
+  border-radius:var(--radius-md);
+  border:1px solid rgba(124,127,242,0.3);
+  background:rgba(9,7,21,0.55);
+}
+.result-tile.winner{
+  border-color:var(--amber);
+  box-shadow:0 0 22px rgba(240,163,85,0.3);
+}
+.result-ring{
+  position:relative;
+  display:grid;
+  place-items:center;
+  width:104px;
+  height:104px;
+  margin-bottom:6px;
+  border-radius:50%;
+  background:conic-gradient(var(--teal) calc(var(--pct) * 1%), rgba(255,255,255,0.08) 0);
+}
+.result-tile.winner .result-ring{
+  background:conic-gradient(var(--amber) calc(var(--pct) * 1%), rgba(255,255,255,0.08) 0);
+}
+.result-ring::before{
+  content:'';
+  position:absolute;
+  inset:9px;
+  border-radius:50%;
+  background:var(--slate-light);
+}
+.result-score{
+  position:relative;
+  font-size:2.1rem;
+  font-weight:800;
+}
+.result-name{
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-weight:700;
+  font-size:0.95rem;
+}
+.result-acc{
+  font-size:0.78rem;
+  color:var(--chalk-dim);
+}
+.result-badge{
+  position:absolute;
+  top:-10px;
+  padding:2px 12px;
+  border-radius:999px;
+  background:var(--amber);
+  color:var(--slate);
+  font-size:0.68rem;
+  font-weight:800;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+}
+@media (max-width: 520px){
+  .result-board{ gap:10px; }
+  .result-ring{ width:84px; height:84px; }
+  .result-score{ font-size:1.7rem; }
 }
 
 .rematch-status{

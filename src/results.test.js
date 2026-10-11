@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { haveEqualAccuracy, isResultTie } from './results.js';
+import { haveEqualAccuracy, isResultTie, buildResultView } from './results.js';
 
 function player(correctCount, wrongCount, score){
   return { correctCount, wrongCount, score };
@@ -50,5 +50,36 @@ describe('isResultTie', () => {
 
   it('is not a tie when both score and accuracy differ', () => {
     expect(isResultTie(player(5, 0, 5), player(9, 1, 8))).toBe(false);
+  });
+});
+
+describe('buildResultView', () => {
+  const a = { name: 'Ana', correctCount: 8, wrongCount: 2, score: 6 };
+  const b = { name: 'Ben', correctCount: 5, wrongCount: 5, score: 0 };
+
+  it('marks the higher scorer as winner', () => {
+    const v = buildResultView([a, b]);
+    expect(v.heading).toBe('Ana wins!');
+    expect(v.tiles.map(t => t.isWinner)).toEqual([true, false]);
+    expect(v.tiles[0]).toMatchObject({ score: 6, max: 10, pct: 80 });
+  });
+
+  it('calls equal scores a tie unless time breaks it', () => {
+    const x = { ...b, score: 6 };
+    expect(buildResultView([a, x]).tiles.some(t => t.isWinner)).toBe(false);
+    const v = buildResultView([a, x], { timeRemaining: [10, 30] });
+    expect(v.heading).toBe('Ben wins the tiebreaker!');
+    expect(v.tiles[1]).toMatchObject({ isWinner: true, timeRemaining: 30 });
+  });
+
+  it('awards a timeout or forfeit to the other player', () => {
+    expect(buildResultView([a, b], { reason: 'timeout', loserIndex: 0 }).heading).toBe('Ben wins on time!');
+    expect(buildResultView([a, b], { reason: 'forfeit', loserIndex: 1 }).tiles[0].isWinner).toBe(true);
+  });
+
+  it('reports no accuracy when nothing was attempted, and handles solo', () => {
+    const idle = { name: 'Cy', correctCount: 0, wrongCount: 0, score: 0 };
+    expect(buildResultView([idle]).tiles[0].pct).toBeNull();
+    expect(buildResultView([a], { reason: 'timeout' }).heading).toBe("Time's up!");
   });
 });

@@ -8,7 +8,7 @@ import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkDashBadges, checkPracticeBad
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './sounds.js';
 import { TILE_EFFECTS, TILE_EFFECTS_BY_ID, isTileEffectUnlocked as isTileEffectUnlockedFor } from './tileEffects.js';
-import { isResultTie } from './results.js';
+import { buildResultView } from './results.js';
 import creditsPhotoUrl from './assets/credits/ariel-tarucan.png';
 import { createRace, joinRace, startRace, reportProgress, finishRace, leaveRace, deleteRace, trackDashPresence, listenToRace, listenToAllRaces, pruneStaleRaces, rejoinRace, DASH_CODE_LENGTH, DASH_WAITING_TIMEOUT_MS } from './dashRace.js';
 import { createLocalDashBackend } from './dashLocalRace.js';
@@ -265,6 +265,7 @@ const el = {
   winnerModal: document.getElementById('winner-modal'),
   winnerHeading: document.getElementById('winner-heading'),
   winnerDetail: document.getElementById('winner-detail'),
+  winnerBoard: document.getElementById('winner-board'),
   rematchBtn: document.getElementById('rematch-btn'),
   newGameBtn: document.getElementById('new-game-btn'),
   rematchStatus: document.getElementById('rematch-status'),
@@ -3063,24 +3064,47 @@ function formatTime(totalSeconds){
   return m + ':' + String(s).padStart(2, '0');
 }
 
-/* Accuracy = correct drops / total drops, as a whole-number percent.
-   Returns 'N/A' if the player never attempted a single drop (e.g. they
-   ran out of time before ever getting a turn), rather than a misleading 0%. */
-function formatAccuracy(player){
-  const correct = player.correctCount || 0;
-  const wrong = player.wrongCount || 0;
-  const total = correct + wrong;
-  if(total === 0) return 'N/A';
-  return Math.round((correct / total) * 100) + '%';
-}
+/* Fills the winner modal from a buildResultView() result: heading, a
+   one-line note, and one tile per player (accuracy ring around the score).
+   Names go in via textContent so a typed name can never inject markup. */
+function showResultView(view){
+  el.winnerHeading.textContent = view.heading;
+  el.winnerDetail.textContent = view.note;
+  el.winnerBoard.replaceChildren(...view.tiles.map(t => {
+    const tile = document.createElement('div');
+    tile.className = 'result-tile' + (t.isWinner ? ' winner' : '');
 
-/* The most a player could have scored: every tap they personally made
-   landing correct. Since score is +1/correct, -1/wrong, this is just
-   their total tap count (correctCount + wrongCount) — score can never
-   exceed it. Reused wherever we show "X pts" at game end so it becomes
-   "X out of Y pts". */
-function maxPossibleScore(player){
-  return (player.correctCount || 0) + (player.wrongCount || 0);
+    const ring = document.createElement('div');
+    ring.className = 'result-ring';
+    ring.style.setProperty('--pct', t.pct ?? 0);
+    const score = document.createElement('span');
+    score.className = 'result-score';
+    score.textContent = t.score;
+    ring.append(score);
+
+    const name = document.createElement('div');
+    name.className = 'result-name';
+    name.textContent = t.name;
+
+    const acc = document.createElement('div');
+    acc.className = 'result-acc';
+    acc.textContent = t.pct === null ? 'No turns taken' : `${t.pct}% accuracy`;
+
+    tile.append(ring, name, acc);
+    if(t.timeRemaining !== null){
+      const time = document.createElement('div');
+      time.className = 'result-acc';
+      time.textContent = `${formatTime(Math.round(t.timeRemaining))} left`;
+      tile.append(time);
+    }
+    if(t.isWinner){
+      const badge = document.createElement('span');
+      badge.className = 'result-badge';
+      badge.textContent = 'Winner';
+      tile.append(badge);
+    }
+    return tile;
+  }));
 }
 
 function updateTimerDisplay(){
@@ -3109,17 +3133,10 @@ function handleTimeOut(playerIndex){
   el.rematchStatus.textContent = '';
   el.rematchBtn.disabled = false;
 
-  const timedOutPlayer = state.players[playerIndex];
   recordMyStats(state.mode, state.players[0].correctCount, state.players[0].wrongCount, state.timeControlSeconds > 0);
 
-  if(state.mode === 'solo'){
-    el.winnerHeading.textContent = "Time's up!";
-    el.winnerDetail.textContent = `${timedOutPlayer.name}, you ran out of time with a score of ${timedOutPlayer.score} out of ${maxPossibleScore(timedOutPlayer)} possible.\nAccuracy: ${formatAccuracy(timedOutPlayer)}`;
-  } else {
-    const winner = state.players[playerIndex === 0 ? 1 : 0];
-    el.winnerHeading.textContent = `${winner.name} wins on time!`;
-    el.winnerDetail.textContent = `${timedOutPlayer.name} ran out of time.\n${state.players[0].name}: ${state.players[0].score}/${maxPossibleScore(state.players[0])} pts, ${formatAccuracy(state.players[0])} accuracy\n${state.players[1].name}: ${state.players[1].score}/${maxPossibleScore(state.players[1])} pts, ${formatAccuracy(state.players[1])} accuracy`;
-  }
+  const timeLeft = state.timeControlSeconds > 0 ? state.players.map(p => p.timeRemaining) : null;
+  showResultView(buildResultView(state.players, { reason: 'timeout', loserIndex: playerIndex, timeRemaining: timeLeft }));
 }
 
 /* =========================================================
@@ -3227,78 +3244,24 @@ function showOnlineWinnerModal(room){
   el.winnerModal.classList.remove('hidden');
   el.reviewMissedBtn.classList.toggle('hidden', state.missLog.length === 0);
 
-  const { heading, detail } = getOnlineResultText(room);
-  el.winnerHeading.textContent = heading;
-  el.winnerDetail.textContent = detail;
+  showResultView(getOnlineResultView(room));
 }
 
-/* Pure text-building for a finished online room — shared by the real
+/* Result data for a finished online room — shared by the real
    players' winner modal above and the read-only spectator view below,
    so the tie/timeout/win phrasing only has to live in one place. */
-function getOnlineResultText(room){
+function getOnlineResultView(room){
   const hostP = room.players.host;
   const guestP = room.players.guest;
-
-  if(room.endReason === 'timeout'){
-    const timedOutRole = room.timedOutRole;
-    const timedOutPlayer = timedOutRole === 'host' ? hostP : guestP;
-    const winner = timedOutRole === 'host' ? guestP : hostP;
-    return {
-      heading: `${winner.name} wins on time!`,
-      detail: `${timedOutPlayer.name} ran out of time.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
-    };
-  }
-
-  if(room.endReason === 'forfeit'){
-    const forfeitedRole = room.forfeitedRole;
-    const forfeitedPlayer = forfeitedRole === 'host' ? hostP : guestP;
-    const winner = forfeitedRole === 'host' ? guestP : hostP;
-    return {
-      heading: `${winner.name} wins!`,
-      detail: `${forfeitedPlayer.name} disconnected and didn't return.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
-    };
-  }
-
-  // isResultTie() (see results.js) calls it a tie either on matching
-  // scores (the original rule) OR matching accuracy despite different
-  // scores — e.g. 5/5 vs 6/6 are both 100% accuracy, so the score gap
-  // there is purely from one player getting an extra attempt, not from
-  // playing better. The time-based tiebreaker below still only applies
-  // when scores are ACTUALLY equal, not just accuracy — "who had more
-  // time left" only makes sense to ask when there's a genuine tied
-  // point total to break, not when the scores themselves differ.
-  if(isResultTie(hostP, guestP)){
-    if(hostP.score === guestP.score){
-      const timerOn = room.settings.timeControlSeconds > 0;
-      const hostTime = room.timeRemaining?.host;
-      const guestTime = room.timeRemaining?.guest;
-      if(timerOn && hostTime !== guestTime){
-        const winner = hostTime > guestTime ? hostP : guestP;
-        const loser = hostTime > guestTime ? guestP : hostP;
-        const winnerTime = hostTime > guestTime ? hostTime : guestTime;
-        const loserTime = hostTime > guestTime ? guestTime : hostTime;
-        return {
-          heading: `${winner.name} wins the tiebreaker!`,
-          detail: `Tied at ${hostP.score} points — ${winner.name} had more time left.\n${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatTime(Math.round(winnerTime))} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatTime(Math.round(loserTime))} remaining, ${formatAccuracy(loser)} accuracy`,
-        };
-      }
-      return {
-        heading: "It's a tie!",
-        detail: `${hostP.name} and ${guestP.name} both scored ${hostP.score}.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
-      };
-    }
-    return {
-      heading: "It's a tie!",
-      detail: `${hostP.name} and ${guestP.name} both had ${formatAccuracy(hostP)} accuracy — the score difference is just from a different number of attempts.\n${hostP.name}: ${hostP.score}/${maxPossibleScore(hostP)} pts, ${formatAccuracy(hostP)} accuracy\n${guestP.name}: ${guestP.score}/${maxPossibleScore(guestP)} pts, ${formatAccuracy(guestP)} accuracy`,
-    };
-  }
-
-  const winner = hostP.score > guestP.score ? hostP : guestP;
-  const loser = hostP.score > guestP.score ? guestP : hostP;
-  return {
-    heading: `${winner.name} wins!`,
-    detail: `${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatAccuracy(loser)} accuracy`,
-  };
+  const reason = room.endReason === 'timeout' ? 'timeout' : room.endReason === 'forfeit' ? 'forfeit' : 'complete';
+  const loserRole = reason === 'timeout' ? room.timedOutRole : room.forfeitedRole;
+  const tr = room.timeRemaining;
+  const timerOn = room.settings.timeControlSeconds > 0 && tr && tr.host !== undefined && tr.guest !== undefined;
+  return buildResultView([hostP, guestP], {
+    reason,
+    loserIndex: loserRole === 'host' ? 0 : 1,
+    timeRemaining: timerOn ? [tr.host, tr.guest] : null,
+  });
 }
 
 /* Renders the accept/waiting/incoming states for the online rematch
@@ -3661,11 +3624,11 @@ function renderSpectatorRoom(room){
 
   if(room.status === 'finished'){
     stopSpectatorTimerPoll();
-    const { heading, detail } = getOnlineResultText(room);
+    const { heading, note } = getOnlineResultView(room);
     el.pairCounter.textContent = 'Game over';
     renderProblem(); // shows the board as it stood at the final move
     el.turnFlag.textContent = heading;
-    el.feedbackLine.textContent = detail.split('\n')[0];
+    el.feedbackLine.textContent = note;
     el.feedbackLine.className = 'feedback-line good';
     el.poolTray.innerHTML = '';
     el.presenceBanner.classList.add('hidden');
@@ -5459,47 +5422,8 @@ function showWinner(){
   el.rematchStatus.textContent = '';
   el.rematchBtn.disabled = false;
 
-  if(state.mode === 'solo'){
-    const p = state.players[0];
-    el.winnerHeading.textContent = 'Nice work!';
-    el.winnerDetail.textContent = `${p.name}, you finished with a score of ${p.score} out of ${maxPossibleScore(p)} possible.\nAccuracy: ${formatAccuracy(p)}`;
-  } else {
-    const [p1, p2] = state.players;
-    let heading, detail;
-    // isResultTie() (see results.js) calls it a tie either on matching
-    // scores (the original rule) OR matching accuracy despite
-    // different scores — e.g. 5/5 vs 6/6 are both 100% accuracy, so
-    // the score gap there is purely from one player getting an extra
-    // attempt, not from playing better. The time-based tiebreaker
-    // below still only applies when scores are ACTUALLY equal, not
-    // just accuracy — "who had more time left" only makes sense to ask
-    // when there's a genuine tied point total to break, not when the
-    // scores themselves differ.
-    if(isResultTie(p1, p2)){
-      if(p1.score === p2.score){
-        const timerOn = state.timeControlSeconds > 0;
-        if(timerOn && p1.timeRemaining !== p2.timeRemaining){
-          const winner = p1.timeRemaining > p2.timeRemaining ? p1 : p2;
-          const loser = p1.timeRemaining > p2.timeRemaining ? p2 : p1;
-          heading = `${winner.name} wins the tiebreaker!`;
-          detail = `Tied at ${p1.score} points — ${winner.name} had more time left.\n${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatTime(winner.timeRemaining)} remaining, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatTime(loser.timeRemaining)} remaining, ${formatAccuracy(loser)} accuracy`;
-        } else {
-          heading = "It's a tie!";
-          detail = `${p1.name} and ${p2.name} both scored ${p1.score}.\n${p1.name}: ${p1.score}/${maxPossibleScore(p1)} pts, ${formatAccuracy(p1)} accuracy\n${p2.name}: ${p2.score}/${maxPossibleScore(p2)} pts, ${formatAccuracy(p2)} accuracy`;
-        }
-      } else {
-        heading = "It's a tie!";
-        detail = `${p1.name} and ${p2.name} both had ${formatAccuracy(p1)} accuracy — the score difference is just from a different number of attempts.\n${p1.name}: ${p1.score}/${maxPossibleScore(p1)} pts, ${formatAccuracy(p1)} accuracy\n${p2.name}: ${p2.score}/${maxPossibleScore(p2)} pts, ${formatAccuracy(p2)} accuracy`;
-      }
-    } else {
-      const winner = p1.score > p2.score ? p1 : p2;
-      const loser = p1.score > p2.score ? p2 : p1;
-      heading = `${winner.name} wins!`;
-      detail = `${winner.name}: ${winner.score}/${maxPossibleScore(winner)} pts, ${formatAccuracy(winner)} accuracy\n${loser.name}: ${loser.score}/${maxPossibleScore(loser)} pts, ${formatAccuracy(loser)} accuracy`;
-    }
-    el.winnerHeading.textContent = heading;
-    el.winnerDetail.textContent = detail;
-  }
+  const timeLeft = state.timeControlSeconds > 0 ? state.players.map(p => p.timeRemaining) : null;
+  showResultView(buildResultView(state.players, { timeRemaining: timeLeft }));
 }
 
 /* =========================================================
