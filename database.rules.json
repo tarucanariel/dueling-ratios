@@ -60,6 +60,16 @@
         ".write": "auth != null && auth.uid === $uid"
       }
     },
+    "leaderboard": {
+      "$board": {
+        ".read": "auth != null && ($board.matches(/^practice-(easy|hard)-(10|15)$/) || $board === 'dash' || $board === 'accuracy')",
+        ".indexOn": ["sortKey"],
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid && auth.token.firebase.sign_in_provider !== 'anonymous' && ($board.matches(/^practice-(easy|hard)-(10|15)$/) || $board === 'dash' || $board === 'accuracy') && (!newData.exists() || !$board.matches(/^practice-/) || !data.exists() || newData.child('sortKey').val() >= data.child('sortKey').val())",
+          ".validate": "newData.hasChildren(['name','sortKey','at']) && newData.child('name').isString() && newData.child('name').val().length <= 100 && newData.child('sortKey').isNumber() && newData.child('at').isNumber()"
+        }
+      }
+    },
     "classes": {
       "$teacherUid": {
         ".read": "auth != null && auth.uid === $teacherUid",

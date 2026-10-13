@@ -666,6 +666,72 @@ body{
   border-bottom-color:var(--amber);
 }
 
+/* Leaderboard rows */
+/* Leaderboard: one ruled sheet of notebook paper (same ink-on-cream
+   language as the Practice Test review slips), with the red margin rule,
+   engraved medals for the podium and a highlighter swipe for "you". */
+.lb-list{
+  --paper:#f4eedf; --ink:#2b2540; --pencil:#6d6683;
+  --pen-blue:#27479b; --pen-red:#c23b2e;
+  --row-h:56px;
+  max-height:50vh; overflow-y:auto; margin:12px 0;
+  background-color:var(--paper);
+  background-image:
+    linear-gradient(90deg, transparent 54px, rgba(194,59,46,0.5) 54px 56px, transparent 56px),
+    repeating-linear-gradient(transparent 0 calc(var(--row-h) - 1px), rgba(70,100,170,0.26) calc(var(--row-h) - 1px) var(--row-h));
+  background-attachment:local;
+  border-radius:3px 3px 5px 5px;
+  box-shadow:0 1px 0 rgba(255,255,255,0.5) inset, 0 10px 22px rgba(0,0,0,0.42);
+}
+.lb-list:empty{ display:none; }
+.lb-row{
+  display:flex; align-items:center;
+  height:var(--row-h); padding:0 16px 0 0;
+  color:var(--ink);
+}
+.lb-rank{
+  flex:0 0 56px; text-align:center;
+  font-family:'JetBrains Mono', monospace; font-weight:700; font-size:1.05rem;
+  color:var(--pencil);
+  transform:rotate(-3deg);
+}
+.lb-row:nth-child(even) .lb-rank{ transform:rotate(2deg); }
+.lb-who{ flex:1; min-width:0; display:flex; flex-direction:column; padding:0 12px 0 14px; }
+.lb-who strong{
+  font-family:'Sora', 'Inter', sans-serif; font-size:0.98rem; font-weight:600;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.lb-who small{ font-size:0.74rem; color:var(--pencil); }
+.lb-value{
+  font-family:'JetBrains Mono', monospace; font-weight:700; font-size:0.95rem;
+  color:var(--pen-blue); white-space:nowrap;
+}
+
+/* Podium: an engraved medal in place of the number */
+.lb-top .lb-rank{ display:flex; justify-content:center; transform:none; }
+.lb-top .lb-rank-num{
+  width:32px; height:32px; border-radius:50%;
+  display:grid; place-items:center;
+  color:#2b2540; font-size:0.95rem;
+  background:radial-gradient(circle at 32% 28%, var(--m1), var(--m2) 62%, var(--m3));
+  box-shadow:0 0 0 2px var(--m3), inset 0 0 0 3px rgba(255,255,255,0.35), 0 2px 3px rgba(0,0,0,0.35);
+}
+.lb-top-1{ --m1:#fff0a8; --m2:#e8b923; --m3:#a97a0b; }
+.lb-top-2{ --m1:#ffffff; --m2:#c4c8d2; --m3:#7d8393; }
+.lb-top-3{ --m1:#f6d2a6; --m2:#c98a4b; --m3:#7f4b1c; }
+.lb-top-1 .lb-who strong{ font-size:1.05rem; }
+
+/* "You": a yellow highlighter swipe across the name + a red-pen note */
+.lb-me .lb-who strong{
+  align-self:flex-start; max-width:100%;
+  padding:0 6px; margin-left:-6px;
+  background:linear-gradient(104deg, transparent 0, rgba(255,226,64,0.75) 4%, rgba(255,226,64,0.85) 96%, transparent 100%);
+  border-radius:3px;
+}
+.lb-me .lb-who small::after{
+  content:' \2190 you'; color:var(--pen-red); font-style:italic; font-weight:600;
+}
+
 .class-card{
   border:1px solid var(--line);
   border-top:none;

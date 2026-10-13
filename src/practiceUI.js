@@ -247,7 +247,12 @@ async function reportCompletion(result){
     console.error('Practice Test onComplete failed:', err);
     outcome = 'failed';
   }
-  if(token === session.startedAt) ui.saveNote.textContent = SAVE_NOTES[outcome] || '';
+  if(token !== session.startedAt) return;
+  // onComplete may return a bare status or { status, rankedNote } (an extra
+  // sentence about the Leaderboard).
+  const status = outcome && outcome.status ? outcome.status : outcome;
+  const extra = outcome && outcome.rankedNote ? ` ${outcome.rankedNote}` : '';
+  ui.saveNote.textContent = (SAVE_NOTES[status] || '') + extra;
 }
 
 /* Each reviewed item is drawn as a graded slip of paper: the right answer

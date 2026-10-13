@@ -3,7 +3,7 @@ import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, FORFEIT_AFTER_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
-import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, recordPracticeResult, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
+import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, recordPracticeResult, submitLeaderboardEntry, getLeaderboard, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkDashBadges, checkPracticeBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './sounds.js';
@@ -15,6 +15,8 @@ import { createLocalDashBackend } from './dashLocalRace.js';
 import { DASH_MAX_PLAYERS, DASH_MIN_PLAYERS, humanCount, isCompetitiveRace, isRaceStale, DASH_TRACK_LENGTH, DASH_WRONG_STEP_BACK, DASH_COUNTDOWN_MS, nextPosition, rankOf, ordinal, sortStandings, hasPlayerLeft, isRaceOver } from './dashLogic.js';
 import { avatarUrlForPlayer } from './dashAvatar.js';
 import { initPracticeUI, closePracticeTest } from './practiceUI.js';
+import { accuracyEntry, dashEntry, practiceEntry, practiceBoardKey, practiceRankReason, practiceBoardLabel } from './leaderboardLogic.js';
+import { initLeaderboardUI } from './leaderboardUI.js';
 import { createQuestionStream } from './practiceLogic.js';
 import { mathHtml } from './mathHtml.js';
 import { playDashCorrect, playDashWrong, playDashCountdownTick, startDashMusic, stopDashMusic } from './dashAudio.js';
@@ -492,6 +494,26 @@ function trackOpTally(op, isCorrect){
    state rather than threaded through every call site's arguments,
    since they're already exactly what was active for THIS just-finished
    game by the time any recordMyStats() caller runs. */
+/* Pushes the signed-in player's entries to the Dash and Accuracy
+   leaderboards from freshly-loaded stats, plus a Practice entry when a
+   just-finished test is passed. Each board skips players who don't
+   qualify yet (see leaderboardLogic.js). Never throws — a leaderboard
+   failure must not affect the stats/badge flow around it. */
+async function syncLeaderboards(stats, practice){
+  if(!state.googleUser) return;
+  const { uid, name } = state.googleUser;
+  let correct = 0, wrong = 0;
+  STATS_MODES.forEach((modeKey) => { correct += stats[modeKey].correctCount; wrong += stats[modeKey].wrongCount; });
+  const jobs = [
+    ['accuracy', accuracyEntry(name, correct, correct + wrong)],
+    ['dash', dashEntry(name, stats.dash)],
+  ];
+  const practiceKey = practice && practiceBoardKey(practice.result);
+  if(practiceKey) jobs.push([practiceKey, practiceEntry(name, practice.result, practice.seconds)]);
+  await Promise.all(jobs.map(([board, entry]) =>
+    submitLeaderboardEntry(board, uid, entry).catch((err) => console.error(`Failed to update ${board} leaderboard:`, err))));
+}
+
 async function recordMyStats(mode, correctCount, wrongCount, hadTimeControl, finishedOnTime = false){
   if(!state.googleUser) return;
   const uid = state.googleUser.uid;
@@ -500,6 +522,7 @@ async function recordMyStats(mode, correctCount, wrongCount, hadTimeControl, fin
     const freshStats = await getPlayerStats(uid);
     state.myBadges = new Set(Object.keys(freshStats.badges || {})); // in case another tab/session earned something since our last load
     state.myStats = freshStats;
+    await syncLeaderboards(freshStats);
     const gameMeta = { mode, totalPairs: state.totalPairs, timeControlSeconds: state.timeControlSeconds, finishedOnTime };
     const newlyEarned = checkGameEndBadges(freshStats, state.myBadges, correctCount || 0, wrongCount || 0, !!hadTimeControl, gameMeta);
     await awardAndCelebrateBadges(newlyEarned);
@@ -1437,15 +1460,19 @@ async function recordPracticeStats(result){
     const freshStats = await getPlayerStats(uid);
     state.myBadges = new Set(Object.keys(freshStats.badges || {}));
     state.myStats = freshStats;
+    await syncLeaderboards(freshStats, { result, seconds: result.seconds });
     const newlyEarned = checkPracticeBadges(freshStats, state.myBadges, { correct: result.correct, total: result.total });
     await awardAndCelebrateBadges(newlyEarned);
   } catch(err){
     console.error('Failed to check practice badges:', err);
   }
-  return 'saved';
+  const reason = practiceRankReason(result);
+  const rankedNote = reason || `Counted on the Leaderboard (${practiceBoardLabel({ difficulty: result.difficulty, count: result.total })}).`;
+  return { status: 'saved', rankedNote };
 }
 
 initPracticeUI({ onComplete: recordPracticeStats });
+initLeaderboardUI({ fetchBoard: getLeaderboard, getMyUid: () => state.googleUser?.uid || null });
 
 /* =========================================================
    Setup screen wiring
@@ -5747,6 +5774,7 @@ async function recordDashStats(race){
     const freshStats = await getPlayerStats(uid);
     state.myBadges = new Set(Object.keys(freshStats.badges || {}));
     state.myStats = freshStats;
+    await syncLeaderboards(freshStats);
     // "Perfect Game" only for a race actually finished without a miss —
     // not for one that someone else ended after a few lucky answers.
     const newlyEarned = [

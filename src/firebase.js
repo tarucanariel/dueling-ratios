@@ -5,7 +5,7 @@
    ========================================================= */
 
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, update, get, increment, push, onValue, set, query, orderByKey, limitToLast } from "firebase/database";
+import { getDatabase, ref, update, get, increment, push, onValue, set, query, orderByKey, orderByChild, limitToLast } from "firebase/database";
 import {
   getAuth, signInAnonymously, onAuthStateChanged,
   GoogleAuthProvider, signInWithPopup, signOut,
@@ -198,6 +198,7 @@ export function watchAuthState(callback){
 export { STATS_MODES, OPERATIONS } from './constants.js';
 import { STATS_MODES, OPERATIONS } from './constants.js';
 import { PRACTICE_TOPICS, PERFECT_TEST_MIN_QUESTIONS } from './practiceLogic.js';
+import { LEADERBOARD_SIZE } from './leaderboardLogic.js';
 
 // Firebase Realtime Database paths can't contain '.', '#', '$', '[', ']',
 // or '/' — none of our operation symbols hit that, but '÷' and '×' are
@@ -333,6 +334,33 @@ export async function awardBadge(uid, badgeId){
    "no anti-cheat" note. */
 export async function setEquippedEffect(uid, effectId){
   await update(ref(db), { [`playerStats/${uid}/equippedEffect`]: effectId });
+}
+
+/* =========================================================
+   Leaderboards — leaderboard/{board}/{uid}, one entry per player per
+   board (see leaderboardLogic.js for the entry shapes and sortKey).
+   Readable by any signed-in account; a player can only write their own
+   entry, and only from a real (non-anonymous) account — see the matching
+   rule in database.rules.json, which also stops a Practice best from
+   being overwritten by a worse run. Best-effort like every other stats
+   write: callers catch and log. ========================================= */
+
+export async function submitLeaderboardEntry(board, uid, entry){
+  if(!entry) return;
+  const path = `leaderboard/${board}/${uid}`;
+  if(board.startsWith('practice-')){
+    // Practice keeps the personal best only.
+    const snap = await get(ref(db, path));
+    if(snap.exists() && snap.val().sortKey >= entry.sortKey) return;
+  }
+  await set(ref(db, path), entry);
+}
+
+/* Top entries for a board, as the raw { uid: entry } map (ranking and
+   formatting happen in buildLeaderboardRows). */
+export async function getLeaderboard(board, limit = LEADERBOARD_SIZE){
+  const snap = await get(query(ref(db, `leaderboard/${board}`), orderByChild('sortKey'), limitToLast(limit)));
+  return snap.exists() ? snap.val() : {};
 }
 
 const FEEDBACK_MAX_LENGTH = 2000;

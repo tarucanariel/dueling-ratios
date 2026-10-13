@@ -24,6 +24,7 @@
       <button class="nav-chip" id="instructions-btn" type="button"><span class="nav-chip-label">Instructions</span></button>
       <button class="nav-chip" id="watch-games-btn" type="button"><span class="nav-chip-label">Watch Games</span></button>
       <button class="nav-chip" id="my-stats-btn" type="button"><span class="nav-chip-label">My Stats</span></button>
+      <button class="nav-chip" id="leaderboard-btn" type="button"><span class="nav-chip-label">Leaderboard</span></button>
       <button class="nav-chip" id="my-classes-btn" type="button"><span class="nav-chip-label">My Classes</span></button>
       <button class="nav-chip" id="worksheet-btn" type="button"><span class="nav-chip-label">Worksheets</span></button>
       <button class="nav-chip" id="practice-btn" type="button"><span class="nav-chip-label">Practice Test</span></button>
@@ -511,6 +512,19 @@
     </div>
 
     <button class="secondary-btn" id="my-stats-close-btn" type="button">Close</button>
+  </div>
+</div>
+
+<!-- Leaderboard — top 50 per board; tabs are built in leaderboardUI.js. -->
+<div class="modal-overlay hidden" id="leaderboard-modal">
+  <div class="modal chalk-panel">
+    <h2 class="game-title" style="font-size:1.6rem;">Leaderboard</h2>
+    <div class="class-nav" id="leaderboard-tabs"></div>
+    <div class="choice-row choice-row-4" id="leaderboard-practice-chips" style="margin-top:12px;"></div>
+    <p class="field-note" id="leaderboard-note"></p>
+    <div class="lb-list" id="leaderboard-list"></div>
+    <p class="field-note">Only signed-in players are ranked.</p>
+    <button class="secondary-btn" id="leaderboard-close-btn" type="button">Close</button>
   </div>
 </div>
 
