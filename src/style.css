@@ -784,9 +784,7 @@ body{
    overrides the text-link look above (underline, text sizing) with a
    small square icon button. The .class-rename-btn / .class-delete-btn
    classes are still applied alongside this one purely so the existing
-   hover-color rules above keep working unchanged; the admin-feedback
-   "Delete" button elsewhere still uses .class-rename-btn on its own
-   (as a text link) and is unaffected since it never gets this class. */
+   hover-color rules above keep working unchanged. */
 .class-icon-btn{
   display:inline-flex;
   align-items:center;
@@ -1115,9 +1113,8 @@ body{
   max-width:560px;
 }
 
-/* Shared corner-FAB look for the feedback and home buttons — same size/
-   shape/gradient/hover language, just anchored to different corners via
-   .feedback-fab (bottom-right) / .home-fab (top-right) below. */
+/* Corner-FAB look for the Home button, anchored top-right via .home-fab
+   below. */
 .corner-fab{
   position:fixed;
   z-index:60;
@@ -1144,119 +1141,17 @@ body{
 
 .corner-fab.hidden{ display:none; }
 
-.feedback-fab{ right:20px; bottom:20px; }
 .home-fab{ right:20px; top:20px; }
 
-.feedback-panel{
+.admin-panel{
   max-width:420px;
 }
 
-.feedback-intro{
+.admin-intro{
   color:var(--chalk-dim);
   font-size:0.88rem;
   line-height:1.5;
   margin:0 0 14px;
-}
-
-.feedback-textarea{
-  width:100%;
-  min-height:110px;
-  padding:12px;
-  border-radius:10px;
-  border:1px solid var(--line);
-  background:var(--slate);
-  color:var(--chalk);
-  font-family:'Inter', sans-serif;
-  font-size:0.9rem;
-  line-height:1.5;
-  resize:vertical;
-}
-
-.feedback-textarea:focus{
-  outline:none;
-  border-color:var(--amber);
-}
-
-.feedback-thanks{
-  color:var(--chalk);
-  font-size:1rem;
-  text-align:center;
-  padding:20px 0;
-  margin:0;
-}
-
-.admin-feedback-entry{
-  border:1px solid var(--line);
-  border-radius:10px;
-  padding:12px 14px;
-  margin-bottom:10px;
-  background:var(--slate);
-}
-
-.admin-feedback-meta{
-  display:flex;
-  align-items:baseline;
-  justify-content:space-between;
-  gap:10px;
-  margin-bottom:6px;
-}
-
-.admin-feedback-name{
-  font-family:'Inter', sans-serif;
-  font-weight:700;
-  font-size:0.85rem;
-  color:var(--chalk);
-}
-
-.admin-feedback-date{
-  font-size:0.72rem;
-  color:var(--chalk-dim);
-  white-space:nowrap;
-}
-
-.admin-feedback-message{
-  color:var(--chalk-dim);
-  font-size:0.88rem;
-  line-height:1.5;
-  margin:0;
-  white-space:pre-wrap;
-  word-break:break-word;
-}
-
-.admin-feedback-actions{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  margin-top:10px;
-}
-
-.admin-feedback-actions .class-rename-btn{
-  margin:0;
-}
-
-.admin-feedback-pagination{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  margin-top:6px;
-}
-
-.admin-feedback-pagination.hidden{ display:none; }
-
-.admin-feedback-pagination .text-link-btn{
-  margin:0;
-}
-
-.admin-feedback-pagination .text-link-btn:disabled{
-  color:var(--chalk-dim);
-  opacity:0.4;
-  cursor:default;
-  text-decoration:none;
-}
-
-#admin-feedback-page-label{
-  color:var(--chalk-dim);
-  font-size:0.8rem;
 }
 
 .admin-section-heading{
@@ -3002,7 +2897,6 @@ body{
   .inline-op{ font-size:0.85rem; padding:0; }
 
   .corner-fab{ width:42px; height:42px; font-size:1.15rem; }
-  .feedback-fab{ right:14px; bottom:14px; }
   .home-fab{ right:14px; top:14px; }
 }
 

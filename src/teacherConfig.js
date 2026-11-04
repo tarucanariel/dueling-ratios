@@ -19,11 +19,11 @@
    ========================================================= */
 export const TEACHER_EMAIL_DOMAIN = 'deped.gov.ph';
 
-/* ADMIN_EMAIL gates the in-app Feedback viewer (My Suggestions/comments
-   from players). Same client-side-check posture as TEACHER_EMAIL_DOMAIN
-   above — the real enforcement lives in database.rules.json, which
-   independently checks auth.token.email against this same address for
-   read access to the feedback/ node. If you ever change this value,
+/* ADMIN_EMAIL gates the in-app Admin hub (Home icon toggle, teacher
+   allowlist, visitor counts). Same client-side-check posture as
+   TEACHER_EMAIL_DOMAIN above — the real enforcement lives in
+   database.rules.json, which independently checks auth.token.email
+   against this same address for the admin-only nodes. If you ever change this value,
    update BOTH places (this file AND database.rules.json), then
    rebuild/redeploy the app *and* deploy the database rules — the two
    are separate deploy steps and neither one updates the other. */

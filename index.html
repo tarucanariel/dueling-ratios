@@ -381,9 +381,6 @@
       <p>Fractions, decimals and percents are the same numbers written three ways, so this multiple-choice test practices moving between them. Open it from the "Practice Test" chip on the opening screen, then choose which topics to include (fractions, decimals, percents), how many questions (5, 10 or 15), and a difficulty — Easy sticks to friendly values like ½, ¼ and 10%, Hard uses trickier ones.</p>
       <p>Questions include converting between forms (like ¾ to a decimal, or 0.35 to a fraction in lowest terms), finding a fraction, decimal or percent of a number, adding and subtracting numbers written in different forms, and picking the greatest or least of a mix. All the questions are on one scrolling page — answer them in any order and change an answer any time before you submit. Any unanswered question counts as wrong. There's a count-up timer, but no time limit.</p>
       <p>When you submit, you get your score, accuracy, time and a result for each topic, plus a review of every question with the correct answer and a short explanation of why. No sign-in needed. If you're signed in with Google, your result is saved to My Stats and can earn Practice Test badges; your teacher also sees your number of tests and accuracy in the class roster. Practice Test answers are kept separate from game stats, so they never change your game badges.</p>
-
-      <h3>Send Feedback</h3>
-      <p>Once signed in with Google, look for the 💬 button in the bottom-right corner of the setup screen. Use it to send a comment, bug report, or suggestion straight to the developer — it only appears on the setup screen itself, not mid-game.</p>
     </div>
 
     <div class="credits">
@@ -947,8 +944,7 @@
 
 <!-- Home FAB — jumps out to the Numeracy Duels hub site. Visible any
      time the opening/setup screen is the thing on top (no sign-in
-     required, unlike the feedback FAB below); see updateFabVisibility
-     in main.js. -->
+     required); see updateFabVisibility in main.js. -->
 <button class="corner-fab home-fab hidden" id="home-fab" type="button" aria-label="Go to Numeracy Duels home">
   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M4 11 12 4l8 7"/>
@@ -956,55 +952,25 @@
   </svg>
 </button>
 
-<!-- Feedback FAB — only shown to signed-in Google accounts (see
-     updateFabVisibility in main.js). Fixed to the viewport, not
-     inside game-wrap, so it stays put across every screen. -->
-<button class="corner-fab feedback-fab hidden" id="feedback-fab" type="button" aria-label="Send feedback or suggestions">
-  💬
-</button>
-
-<div class="modal-overlay hidden" id="feedback-modal">
-  <div class="modal chalk-panel feedback-panel">
-    <div class="instructions-header">
-      <h2 class="modal-heading">Send Feedback</h2>
-      <button class="close-btn" id="close-feedback-btn" aria-label="Close feedback" type="button">&times;</button>
-    </div>
-
-    <div id="feedback-form-view">
-      <p class="feedback-intro">Any suggestions? Have an idea to make the game better? Please let me know!</p>
-      <textarea id="feedback-message-input" class="feedback-textarea" maxlength="2000" rows="5" placeholder="What's working well? What could be better?"></textarea>
-      <p class="setup-error" id="feedback-error"></p>
-      <button class="secondary-btn" id="feedback-submit-btn" type="button">Send Feedback</button>
-    </div>
-
-    <div class="hidden" id="feedback-thanks-view">
-      <p class="feedback-thanks">🎉 Thanks! Your feedback has been sent.</p>
-    </div>
-  </div>
-</div>
-
 <!-- Admin hub — chip visibility is gated to ADMIN_EMAIL (see
      teacherConfig.js). Everyone else never sees the "Admin" chip at
      all. Collects every admin-only control behind one modal. -->
 <div class="modal-overlay hidden" id="admin-modal">
-  <div class="modal chalk-panel feedback-panel">
+  <div class="modal chalk-panel admin-panel">
     <div class="instructions-header">
       <h2 class="modal-heading">Admin</h2>
       <button class="close-btn" id="close-admin-btn" aria-label="Close admin panel" type="button">&times;</button>
     </div>
-    <div class="setup-links-row">
-      <button class="nav-chip" id="admin-feedback-btn" type="button"><span class="nav-chip-label">Feedback</span></button>
-    </div>
 
     <h3 class="admin-section-heading">Home Site Access</h3>
-    <p class="feedback-intro">Controls the Home icon (top-left) that lets visitors jump to the Numeracy Duels hub site. Untick to hide it from everyone — for example while other games there aren't ready to show yet.</p>
+    <p class="admin-intro">Controls the Home icon (top-left) that lets visitors jump to the Numeracy Duels hub site. Untick to hide it from everyone — for example while other games there aren't ready to show yet.</p>
     <label class="checkbox-item">
       <input type="checkbox" id="admin-home-visible-checkbox" checked>
       <span>Show Home icon to visitors</span>
     </label>
 
     <h3 class="admin-section-heading">Teacher Allowlist</h3>
-    <p class="feedback-intro">Accounts added here get teacher access (My Classes creation + Watch Games) even without a @deped.gov.ph email — for staff whose school account isn't set up yet.</p>
+    <p class="admin-intro">Accounts added here get teacher access (My Classes creation + Watch Games) even without a @deped.gov.ph email — for staff whose school account isn't set up yet.</p>
 
     <div class="class-rename-row">
       <input type="email" id="teacher-allowlist-input" class="class-rename-input" placeholder="teacher@example.com" autocomplete="off">
@@ -1012,7 +978,7 @@
     </div>
     <p class="setup-error" id="teacher-allowlist-error"></p>
 
-    <p class="feedback-intro hidden" id="teacher-allowlist-empty">No extra teacher accounts added yet.</p>
+    <p class="admin-intro hidden" id="teacher-allowlist-empty">No extra teacher accounts added yet.</p>
     <div id="teacher-allowlist-list"></div>
 
     <h3 class="admin-section-heading">Daily Users (Last 10 Days)</h3>
@@ -1042,28 +1008,6 @@
         <span class="admin-stat-value" id="admin-alltime-total">—</span>
         <span class="admin-stat-label">Total</span>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- Admin-only feedback viewer, opened from the Admin hub above. The
-     actual data access is gated to ADMIN_EMAIL (see teacherConfig.js
-     and the matching database.rules.json read rule). -->
-<div class="modal-overlay hidden" id="admin-feedback-modal">
-  <div class="modal chalk-panel feedback-panel">
-    <div class="instructions-header">
-      <h2 class="modal-heading">Player Feedback</h2>
-      <button class="close-btn" id="close-admin-feedback-btn" aria-label="Close feedback viewer" type="button">&times;</button>
-    </div>
-
-    <p class="setup-error" id="admin-feedback-error"></p>
-    <p class="feedback-intro hidden" id="admin-feedback-empty">No feedback has been submitted yet.</p>
-    <div id="admin-feedback-list"></div>
-
-    <div class="admin-feedback-pagination hidden" id="admin-feedback-pagination">
-      <button class="text-link-btn" id="admin-feedback-prev-btn" type="button">&larr; Prev</button>
-      <span id="admin-feedback-page-label"></span>
-      <button class="text-link-btn" id="admin-feedback-next-btn" type="button">Next &rarr;</button>
     </div>
   </div>
 </div>

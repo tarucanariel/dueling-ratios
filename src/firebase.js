@@ -363,54 +363,6 @@ export async function getLeaderboard(board, limit = LEADERBOARD_SIZE){
   return snap.exists() ? snap.val() : {};
 }
 
-const FEEDBACK_MAX_LENGTH = 2000;
-
-/* Submits one piece of player feedback (comment/suggestion) to
-   feedback/{pushId}. Any signed-in Google account can create a new
-   entry; the database rules only allow *creating* a brand-new push
-   key, not editing or deleting an existing one, so a submitted note
-   can't later be tampered with. Reading it back is restricted to the
-   ADMIN_EMAIL account (see getAllFeedback below and the matching rule
-   in database.rules.json) — everyone else, including the person who
-   submitted it, has no way to read feedback back through the app. */
-export async function submitFeedback(uid, name, message){
-  const trimmed = (message || '').trim();
-  if(!trimmed) throw new Error('empty-message');
-  if(trimmed.length > FEEDBACK_MAX_LENGTH) throw new Error('too-long');
-  const feedbackRef = push(ref(db, 'feedback'));
-  await update(feedbackRef, {
-    uid,
-    name: name || 'Anonymous',
-    message: trimmed,
-    createdAt: Date.now(),
-  });
-}
-
-/* Fetches every feedback entry, newest first, for the admin-only
-   in-app viewer. Only actually returns data for ADMIN_EMAIL — the
-   database rule denies everyone else, so this throws a permission
-   error for any other signed-in account. Pagination (5 per page) is
-   handled client-side in main.js by slicing this already-sorted array
-   rather than using Firebase's cursor-based paging, since expected
-   feedback volume is small enough that fetching it all in one read is
-   simpler and cheap. */
-export async function getAllFeedback(){
-  const snap = await get(ref(db, 'feedback'));
-  if(!snap.exists()) return [];
-  const data = snap.val();
-  return Object.keys(data)
-    .map((id) => ({ id, ...data[id] }))
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-}
-
-/* Deletes one feedback entry. Admin-only per the database rule (see
-   database.rules.json) — this is a delete, not an edit; the rules
-   explicitly don't allow overwriting an existing entry's content, only
-   removing it entirely. */
-export async function deleteFeedback(feedbackId){
-  await update(ref(db), { [`feedback/${feedbackId}`]: null });
-}
-
 /* =========================================================
    Teacher allowlist — lets ADMIN_EMAIL grant "teacher" status (My
    Classes creation + Watch Games access, see isTeacherAccount() in
@@ -501,7 +453,7 @@ export async function recordVisit(category, key){
    Returns { 'YYYY-MM-DD': {teacher, student, guest} } — only for dates
    that actually have at least one visit logged; the admin dashboard in
    main.js fills in 0 for any of the last 10 calendar days missing
-   here. Admin-only per the database rule, same as getAllFeedback. */
+   here. Admin-only per the database rule. */
 export async function getDailyVisitCounts(days = 10){
   const snap = await get(query(ref(db, 'analytics/dailyVisits'), orderByKey(), limitToLast(days)));
   if(!snap.exists()) return {};
@@ -520,7 +472,7 @@ export async function getDailyVisitCounts(days = 10){
 
 /* Fetches the full allTimeVisitors subtree and reduces it to a
    per-category unique count. Reads the whole thing in one call, same
-   "expected volume is small enough" reasoning as getAllFeedback —
+   "expected volume is small enough" reasoning as getDailyVisitCounts —
    revisit if this ever grows into the tens of thousands of entries. */
 export async function getAllTimeVisitorCounts(){
   const snap = await get(ref(db, 'analytics/allTimeVisitors'));

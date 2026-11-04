@@ -3,7 +3,7 @@ import { generateProblem, buildProblemLayout, buildPool } from './logic.js';
 import { createRoom, joinRoom, listenToRoom, listenToAllRooms, submitRoomUpdate, requestRematch, resetRoomForRematch, pruneStaleRooms, isRoomStale, trackPresence, getRoomOnce, REJOIN_WINDOW_MS, FORFEIT_AFTER_MS, sendChallenge, acceptChallenge, clearChallenge, pruneStaleChallenges, CHALLENGE_TIMEOUT_MS } from './online.js';
 import { TEACHER_EMAIL_DOMAIN, ADMIN_EMAIL } from './teacherConfig.js';
 import { ref, remove } from 'firebase/database';
-import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, submitFeedback, getAllFeedback, deleteFeedback, awardBadge, recordPracticeResult, submitLeaderboardEntry, getLeaderboard, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
+import { db, signInWithGoogle, signOutUser, recordGameResult, getPlayerStats, STATS_MODES, watchAuthState, isGoogleUser, awardBadge, recordPracticeResult, submitLeaderboardEntry, getLeaderboard, setEquippedEffect, serverNow, getTeacherAllowlist, addTeacherAllowlistEntry, removeTeacherAllowlistEntry, recordVisit, formatDateKey, getDailyVisitCounts, getAllTimeVisitorCounts, watchHomeVisibility, setHomeVisibility } from './firebase.js';
 import { BADGE_DEFS_BY_ID, checkGameEndBadges, checkDashBadges, checkPracticeBadges, checkStreakBadge, getNextBadgeProgress } from './badges.js';
 import { createClass, getMyClasses, joinClass, leaveClass, renameClass, deleteClass, removeStudent, verifyClassMembership, MAX_CLASSES_PER_TEACHER } from './class.js';
 import { playSound, playCorrectSound, playStartSound, playHeckleLaugh } from './sounds.js';
@@ -198,14 +198,6 @@ const el = {
   closeInstructionsBtn: document.getElementById('close-instructions-btn'),
   creditsPhoto: document.getElementById('credits-photo'),
   homeFab: document.getElementById('home-fab'),
-  feedbackFab: document.getElementById('feedback-fab'),
-  feedbackModal: document.getElementById('feedback-modal'),
-  closeFeedbackBtn: document.getElementById('close-feedback-btn'),
-  feedbackFormView: document.getElementById('feedback-form-view'),
-  feedbackThanksView: document.getElementById('feedback-thanks-view'),
-  feedbackMessageInput: document.getElementById('feedback-message-input'),
-  feedbackError: document.getElementById('feedback-error'),
-  feedbackSubmitBtn: document.getElementById('feedback-submit-btn'),
   adminBtn: document.getElementById('admin-btn'),
   adminModal: document.getElementById('admin-modal'),
   adminHomeVisibleCheckbox: document.getElementById('admin-home-visible-checkbox'),
@@ -221,16 +213,7 @@ const el = {
   adminAlltimeStudents: document.getElementById('admin-alltime-students'),
   adminAlltimeGuests: document.getElementById('admin-alltime-guests'),
   adminAlltimeTotal: document.getElementById('admin-alltime-total'),
-  adminFeedbackBtn: document.getElementById('admin-feedback-btn'),
-  adminFeedbackModal: document.getElementById('admin-feedback-modal'),
-  closeAdminFeedbackBtn: document.getElementById('close-admin-feedback-btn'),
-  adminFeedbackError: document.getElementById('admin-feedback-error'),
-  adminFeedbackEmpty: document.getElementById('admin-feedback-empty'),
-  adminFeedbackList: document.getElementById('admin-feedback-list'),
-  adminFeedbackPagination: document.getElementById('admin-feedback-pagination'),
-  adminFeedbackPrevBtn: document.getElementById('admin-feedback-prev-btn'),
-  adminFeedbackNextBtn: document.getElementById('admin-feedback-next-btn'),
-  adminFeedbackPageLabel: document.getElementById('admin-feedback-page-label'),  roomCodeDisplay: document.getElementById('room-code-display'),
+  roomCodeDisplay: document.getElementById('room-code-display'),
   cancelWaitingBtn: document.getElementById('cancel-waiting-btn'),
 
   incomingChallenge: document.getElementById('incoming-challenge'),
@@ -1506,16 +1489,15 @@ el.instructionsModal.addEventListener('click', (e) => {
 el.creditsPhoto.src = creditsPhotoUrl;
 
 /* =========================================================
-   Corner FABs (home + feedback) — both only visible while the
-   opening/setup screen (#setup-modal) is the thing actually on top:
-     - home-fab: no other condition, anyone landing on the setup
-       screen can jump to the hub site.
-     - feedback-fab: additionally requires a signed-in Google account.
+   Corner FAB (home) — only visible while the opening/setup screen
+   (#setup-modal) is the thing actually on top (and the admin hasn't
+   hidden it), so anyone landing on the setup screen can jump to the
+   hub site.
 
    "On top" means #setup-modal is not hidden AND no OTHER .modal-overlay
    is open over it — #setup-modal never actually hides itself when a
    sub-modal (Instructions, My Stats, Worksheets, Admin, etc.) opens,
-   they just stack, so checking #setup-modal alone left both FABs
+   they just stack, so checking #setup-modal alone left the FAB
    floating above whatever modal happened to be open.
 
    Rather than patch every one of the ~15 places elsewhere in this file
@@ -1537,7 +1519,6 @@ function isSetupScreenOnTop(){
 function updateFabVisibility(){
   const onSetupScreen = isSetupScreenOnTop();
   el.homeFab.classList.toggle('hidden', !(onSetupScreen && state.homeVisible));
-  el.feedbackFab.classList.toggle('hidden', !(!!state.googleUser && onSetupScreen));
 }
 
 document.querySelectorAll('.modal-overlay').forEach(modal => {
@@ -1592,159 +1573,6 @@ function goHome(){
 }
 
 el.homeFab.addEventListener('click', goHome);
-
-function openFeedbackModal(){
-  el.feedbackFormView.classList.remove('hidden');
-  el.feedbackThanksView.classList.add('hidden');
-  el.feedbackMessageInput.value = '';
-  el.feedbackError.textContent = '';
-  el.feedbackSubmitBtn.disabled = false;
-  el.feedbackModal.classList.remove('hidden');
-  el.feedbackMessageInput.focus();
-}
-
-function closeFeedbackModal(){
-  el.feedbackModal.classList.add('hidden');
-}
-
-async function handleFeedbackSubmit(){
-  if(!state.googleUser) return; // FAB shouldn't be reachable otherwise, but guard anyway
-  el.feedbackError.textContent = '';
-  const message = el.feedbackMessageInput.value.trim();
-  if(!message){
-    el.feedbackError.textContent = 'Please enter your feedback before sending.';
-    return;
-  }
-  el.feedbackSubmitBtn.disabled = true;
-  try{
-    await submitFeedback(state.googleUser.uid, state.googleUser.name, message);
-    el.feedbackFormView.classList.add('hidden');
-    el.feedbackThanksView.classList.remove('hidden');
-    setTimeout(closeFeedbackModal, 1600);
-  } catch(err){
-    el.feedbackError.textContent = 'Could not send your feedback. Please try again.';
-    console.error('Failed to submit feedback:', err);
-    el.feedbackSubmitBtn.disabled = false;
-  }
-}
-
-el.feedbackFab.addEventListener('click', openFeedbackModal);
-el.closeFeedbackBtn.addEventListener('click', closeFeedbackModal);
-el.feedbackModal.addEventListener('click', (e) => {
-  if(e.target === el.feedbackModal) closeFeedbackModal();
-});
-el.feedbackSubmitBtn.addEventListener('click', handleFeedbackSubmit);
-el.feedbackMessageInput.addEventListener('keydown', (e) => {
-  if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleFeedbackSubmit();
-});
-
-/* =========================================================
-   Admin feedback viewer — chip only visible to ADMIN_EMAIL (toggled
-   above in updatePlayerIdentityUI). Fetches every entry in one read
-   (see getAllFeedback in firebase.js) and paginates client-side, 5 per
-   page, since expected volume is small enough that this is simpler
-   than Firebase's cursor-based paging.
-   ========================================================= */
-
-const ADMIN_FEEDBACK_PAGE_SIZE = 5;
-let adminFeedbackEntries = [];
-let adminFeedbackPage = 0;
-
-function renderAdminFeedbackPage(){
-  el.adminFeedbackList.innerHTML = '';
-  const totalPages = Math.max(1, Math.ceil(adminFeedbackEntries.length / ADMIN_FEEDBACK_PAGE_SIZE));
-  adminFeedbackPage = Math.min(adminFeedbackPage, totalPages - 1);
-  const start = adminFeedbackPage * ADMIN_FEEDBACK_PAGE_SIZE;
-  const pageEntries = adminFeedbackEntries.slice(start, start + ADMIN_FEEDBACK_PAGE_SIZE);
-
-  el.adminFeedbackEmpty.classList.toggle('hidden', adminFeedbackEntries.length > 0);
-  el.adminFeedbackPagination.classList.toggle('hidden', adminFeedbackEntries.length <= ADMIN_FEEDBACK_PAGE_SIZE);
-  el.adminFeedbackPrevBtn.disabled = adminFeedbackPage === 0;
-  el.adminFeedbackNextBtn.disabled = adminFeedbackPage >= totalPages - 1;
-  el.adminFeedbackPageLabel.textContent = `Page ${adminFeedbackPage + 1} of ${totalPages}`;
-
-  pageEntries.forEach((entry) => {
-    const card = document.createElement('div');
-    card.className = 'admin-feedback-entry';
-
-    const meta = document.createElement('div');
-    meta.className = 'admin-feedback-meta';
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'admin-feedback-name';
-    nameSpan.textContent = entry.name || 'Anonymous';
-    const dateSpan = document.createElement('span');
-    dateSpan.className = 'admin-feedback-date';
-    dateSpan.textContent = entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '';
-    meta.append(nameSpan, dateSpan);
-
-    const message = document.createElement('p');
-    message.className = 'admin-feedback-message';
-    message.textContent = entry.message || '';
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'text-link-btn class-rename-btn admin-feedback-delete-btn';
-    deleteBtn.textContent = 'Delete';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'text-link-btn class-rename-cancel hidden';
-    cancelBtn.textContent = 'Cancel';
-    let confirming = false;
-    function resetDeleteBtn(){
-      confirming = false;
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.classList.remove('class-delete-btn');
-      deleteBtn.disabled = false;
-      cancelBtn.classList.add('hidden');
-    }
-    deleteBtn.addEventListener('click', async () => {
-      if(!confirming){
-        confirming = true;
-        deleteBtn.textContent = 'Confirm?';
-        deleteBtn.classList.add('class-delete-btn');
-        cancelBtn.classList.remove('hidden');
-        return;
-      }
-      deleteBtn.disabled = true;
-      try{
-        await deleteFeedback(entry.id);
-        adminFeedbackEntries = adminFeedbackEntries.filter((e) => e.id !== entry.id);
-        renderAdminFeedbackPage();
-      } catch(err){
-        console.error(`Failed to delete feedback ${entry.id}:`, err);
-        resetDeleteBtn();
-      }
-    });
-    cancelBtn.addEventListener('click', resetDeleteBtn);
-
-    const actionsRow = document.createElement('div');
-    actionsRow.className = 'admin-feedback-actions';
-    actionsRow.append(deleteBtn, cancelBtn);
-
-    card.append(meta, message, actionsRow);
-    el.adminFeedbackList.appendChild(card);
-  });
-}
-
-async function openAdminFeedbackModal(){
-  el.adminFeedbackError.textContent = '';
-  el.adminFeedbackList.innerHTML = '';
-  el.adminFeedbackEmpty.classList.add('hidden');
-  el.adminFeedbackPagination.classList.add('hidden');
-  el.adminFeedbackModal.classList.remove('hidden');
-  try{
-    adminFeedbackEntries = await getAllFeedback();
-    adminFeedbackPage = 0;
-    renderAdminFeedbackPage();
-  } catch(err){
-    el.adminFeedbackError.textContent = 'Could not load feedback. Please try again.';
-    console.error('Failed to load admin feedback:', err);
-  }
-}
-
-function closeAdminFeedbackModal(){
-  el.adminFeedbackModal.classList.add('hidden');
-}
 
 function closeAdminModal(){
   el.adminModal.classList.add('hidden');
@@ -1923,25 +1751,6 @@ el.teacherAllowlistInput.addEventListener('keydown', (e) => {
   if(e.key === 'Enter'){
     e.preventDefault();
     el.teacherAllowlistAddBtn.click();
-  }
-});
-
-el.adminFeedbackBtn.addEventListener('click', openAdminFeedbackModal);
-el.closeAdminFeedbackBtn.addEventListener('click', closeAdminFeedbackModal);
-el.adminFeedbackModal.addEventListener('click', (e) => {
-  if(e.target === el.adminFeedbackModal) closeAdminFeedbackModal();
-});
-el.adminFeedbackPrevBtn.addEventListener('click', () => {
-  if(adminFeedbackPage > 0){
-    adminFeedbackPage--;
-    renderAdminFeedbackPage();
-  }
-});
-el.adminFeedbackNextBtn.addEventListener('click', () => {
-  const totalPages = Math.max(1, Math.ceil(adminFeedbackEntries.length / ADMIN_FEEDBACK_PAGE_SIZE));
-  if(adminFeedbackPage < totalPages - 1){
-    adminFeedbackPage++;
-    renderAdminFeedbackPage();
   }
 });
 
