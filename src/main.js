@@ -3695,6 +3695,19 @@ function renderProblem(){
   if(state.mode === 'dash'){
     const activeSlot = el.problemStrip.querySelector('.cell-slot.active');
     if(activeSlot) activeSlot.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  } else if(state.spectating){
+    // Watch Games: follow the players' progress down the board so the
+    // teacher never has to scroll by hand. Only scrolls when the glowing
+    // slot has drifted out of the comfortable middle of the screen, so
+    // moves within the visible area don't make the page jump every time.
+    const activeSlot = el.problemStrip.querySelector('.cell-slot.active');
+    if(activeSlot){
+      const r = activeSlot.getBoundingClientRect();
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      if(r.top < vh * 0.15 || r.bottom > vh * 0.7){
+        activeSlot.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
   }
 }
 
