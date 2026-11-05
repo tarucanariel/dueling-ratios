@@ -97,6 +97,7 @@ const state = {
   watchRaces: {},
   dashSpec: null,             // teacher's live view of one Ratio Dash race, or null — see startDashSpectating()
   spectateTimerId: null,     // display-only poll; never writes to the room
+  pairHold: null,            // { apply, current, pending, timerId } while a just-completed online pair is held on screen — see holdCompletedPair()
 };
 
 /* ---------- DOM refs ---------- */
@@ -2069,6 +2070,7 @@ function resetToSetup(){
 
 function leaveOnlineRoom(){
   clearSeat();
+  clearPairHold();
   if(state.unsubscribeRoom){
     state.unsubscribeRoom();
     state.unsubscribeRoom = null;
@@ -2513,8 +2515,20 @@ async function attemptRejoin(){
 /* Fires on every change to /rooms/{code} — for BOTH players symmetrically.
    Rather than each device mutating its own copy of the game state, Firebase
    is the single source of truth here: every snapshot fully replaces the
-   locally-rendered state, and we just repaint from it. */
+   locally-rendered state, and we just repaint from it.
+
+   Goes through holdCompletedPair() first, so a just-solved pair stays on
+   screen for PAIR_COMPLETE_HOLD_MS before the next one replaces it. */
 function onRoomUpdate(room){
+  if(!room){
+    clearPairHold();
+    applyRoomUpdate(room);
+    return;
+  }
+  holdCompletedPair(room, state.room, applyRoomUpdate, () => { state.inputLocked = true; });
+}
+
+function applyRoomUpdate(room){
   if(!room){
     // Room was deleted (e.g. host cancelled) — bail back to setup.
     if(state.isOnline) resetToSetup();
@@ -2644,8 +2658,11 @@ function onRoomUpdate(room){
 
   if(room.status === 'active'){
     if(timerOn && !opponentConnected && prevOpponentConnected && room.turnDeadline){
-      const bankedActive = Math.max(0, (room.turnDeadline - serverNow()) / 1000);
       const activeRole = room.turn;
+      const bankedActive = Math.min(
+        Math.max(0, (room.turnDeadline - serverNow()) / 1000),
+        room.timeRemaining[activeRole], // don't bank any unused pair-complete hold
+      );
       submitRoomUpdate(state.roomCode, {
         timeRemaining: {
           host: activeRole === 'host' ? bankedActive : room.timeRemaining.host,
@@ -2817,10 +2834,19 @@ function handleOnlineTileClick(tileId){
   // acted) had left, then start a fresh deadline for whoever's turn is next.
   if(state.room.settings.timeControlSeconds > 0 && state.room.turnDeadline){
     const now = serverNow();
-    const myRemaining = Math.max(0, (state.room.turnDeadline - now) / 1000);
+    // Capped at what I had when my turn began: if my deadline included a
+    // pair-complete hold (below), moving during it must not bank extra time.
+    const myRemaining = Math.min(
+      Math.max(0, (state.room.turnDeadline - now) / 1000),
+      state.room.timeRemaining[myKey],
+    );
     updates[`timeRemaining/${myKey}`] = myRemaining;
     const otherRemaining = state.room.timeRemaining[otherKey];
-    updates.turnDeadline = now + otherRemaining * 1000;
+    // A move that starts the next pair puts every screen on a
+    // PAIR_COMPLETE_HOLD_MS pause (see holdCompletedPair), during which the
+    // next player can't move — so their clock starts after it, not during it.
+    const holdMs = updates.pairIndex ? PAIR_COMPLETE_HOLD_MS : 0;
+    updates.turnDeadline = now + otherRemaining * 1000 + holdMs;
   }
 
   submitRoomUpdate(state.roomCode, updates).catch(err => {
@@ -3016,7 +3042,7 @@ function tickOnlineTimer(){
   const now = serverNow();
   const activeRole = room.turn;
   const inactiveRole = activeRole === 'host' ? 'guest' : 'host';
-  const activeRemaining = Math.max(0, Math.ceil((room.turnDeadline - now) / 1000));
+  const activeRemaining = activeClockSeconds(room, now);
   const inactiveRemaining = Math.round(room.timeRemaining[inactiveRole]);
 
   const hostRemaining = activeRole === 'host' ? activeRemaining : inactiveRemaining;
@@ -3026,6 +3052,15 @@ function tickOnlineTimer(){
   el.chipP1Timer.classList.toggle('time-low', hostRemaining <= 10);
   el.chipP2Timer.textContent = formatTime(guestRemaining);
   el.chipP2Timer.classList.toggle('time-low', guestRemaining <= 10);
+}
+
+/* Seconds shown on the active player's clock. Never above what they had
+   when the turn began, so the pair-complete hold added to turnDeadline
+   shows as the clock sitting still rather than briefly jumping up. */
+function activeClockSeconds(room, now){
+  const live = Math.max(0, Math.ceil((room.turnDeadline - now) / 1000));
+  const banked = room.timeRemaining?.[room.turn];
+  return typeof banked === 'number' ? Math.min(live, Math.ceil(banked)) : live;
 }
 
 /* Either device (the one whose turn it is, or the one waiting) can
@@ -3340,8 +3375,83 @@ function startSpectating(code){
       stopSpectating(true);
       return;
     }
-    renderSpectatorRoom(room);
+    holdCompletedPair(room, state.spectateRoom, renderSpectatorRoom);
   });
+}
+
+/* How long a just-completed pair stays on screen before the next one
+   replaces it — for local games (finishPair), online players and Watch
+   Games spectators alike. Online, the move that fills a pair's last cell
+   also writes the NEXT problem in the same room update (see
+   handleOnlineTileClick), so without this hold the opponent and any
+   spectator would never see the finished board at all. The mover adds
+   the same amount to the next player's clock deadline, so the hold never
+   costs anyone time. */
+const PAIR_COMPLETE_HOLD_MS = 1500;
+
+/* Shared by onRoomUpdate (players) and the spectator listener. `apply`
+   is the normal full render for a snapshot; `onHoldStart` runs after the
+   completed board is painted (players use it to lock input, since the
+   tiles on screen belong to the finished pair). */
+function holdCompletedPair(room, prev, apply, onHoldStart){
+  const hold = state.pairHold;
+  if(hold){
+    // Still showing the completed pair — keep only the newest snapshot
+    // and apply it when the hold ends.
+    hold.pending = room;
+    return;
+  }
+  apply(room);
+  if(prev && prev.problem && room.status === 'active' && room.pairIndex > prev.pairIndex){
+    showCompletedPair(prev, room);
+    if(onHoldStart) onHoldStart();
+    state.pairHold = {
+      apply,
+      current: room,
+      pending: null,
+      timerId: setTimeout(releasePairHold, PAIR_COMPLETE_HOLD_MS),
+    };
+  }
+}
+
+function releasePairHold(){
+  const hold = state.pairHold;
+  if(!hold) return;
+  clearTimeout(hold.timerId);
+  state.pairHold = null;
+  if(!state.spectating && !state.isOnline) return; // left the game during the hold
+  // The render diffs against the snapshot that started the hold, so
+  // re-applying that one is silent; a newer pending snapshot still gets
+  // its sounds/replays as usual.
+  hold.apply(hold.pending || hold.current);
+}
+
+function clearPairHold(){
+  if(state.pairHold){
+    clearTimeout(state.pairHold.timerId);
+    state.pairHold = null;
+  }
+}
+
+/* Repaints the board with the PREVIOUS pair fully solved (every cell
+   filled, including the one the last move just completed). Scores,
+   sounds and streak popups have already been updated from the new
+   snapshot by the normal render; only the board and pool are rolled
+   back to the finished pair for the length of the hold. */
+function showCompletedPair(prev, room){
+  state.problem = prev.problem;
+  state.layout = buildProblemLayout(prev.problem);
+  state.cells = state.layout.cells;
+  state.cellIndex = state.cells.length;
+  const usedTileId = room.lastMove?.tileId;
+  state.pool = (prev.pool || []).filter(t => t.id !== usedTileId);
+  state.pairIndex = prev.pairIndex;
+
+  el.pairCounter.textContent = `Pair ${prev.pairIndex} of ${state.totalPairs} — complete!`;
+  renderProblem();
+  renderPool();
+  el.feedbackLine.textContent = `Pair ${prev.pairIndex} solved — next pair coming up…`;
+  el.feedbackLine.className = 'feedback-line good';
 }
 
 function stopSpectating(backToList){
@@ -3351,6 +3461,7 @@ function stopSpectating(backToList){
     state.unsubscribeSpectateRoom = null;
   }
   stopSpectatorTimerPoll();
+  clearPairHold();
   state.spectating = false;
   state.spectateRoomCode = null;
   state.spectateRoom = null;
@@ -3510,7 +3621,7 @@ function tickSpectatorTimer(){
   const now = serverNow();
   const activeRole = room.turn;
   const inactiveRole = activeRole === 'host' ? 'guest' : 'host';
-  const activeRemaining = Math.max(0, Math.ceil((room.turnDeadline - now) / 1000));
+  const activeRemaining = activeClockSeconds(room, now);
   const inactiveRemaining = Math.round(room.timeRemaining[inactiveRole]);
 
   const hostRemaining = activeRole === 'host' ? activeRemaining : inactiveRemaining;
@@ -5072,7 +5183,15 @@ function handleTileClick(tileId){
     if(state.mode === 'vs' || state.mode === 'computer') advanceTurn();
 
     if(state.cellIndex >= state.cells.length){
-      setTimeout(finishPair, 700); // startNextPair()/showWinner() will unlock
+      // The hold isn't anyone's thinking time, so pause the chess clock
+      // through it and restart it with the next pair.
+      const clockWasRunning = state.timerId !== null;
+      const isLastPair = state.pairIndex >= state.totalPairs;
+      stopTimer();
+      setTimeout(() => {
+        finishPair(); // startNextPair()/showWinner() will unlock
+        if(clockWasRunning && !isLastPair && !el.gameScreen.classList.contains('hidden')) startTimer();
+      }, PAIR_COMPLETE_HOLD_MS);
       return;
     }
     setTimeout(() => { renderProblem(); state.inputLocked = false; syncPoolLockState(); }, 250);
@@ -5282,7 +5401,7 @@ const DASH_OPTION_LETTERS = ['A', 'B', 'C', 'D'];
 const DASH_QUESTION_CORRECT_DELAY_MS = 450;  // a right answer glides straight to the next question
 const DASH_QUESTION_REVEAL_MS = 1800;        // a wrong one shows the right answer for this long first
 const DASH_UNLOCK_DELAY_MS = 250;      // matches the normal correct-answer re-render delay
-const DASH_NEXT_PROBLEM_DELAY_MS = 700; // matches finishPair()'s pause
+const DASH_NEXT_PROBLEM_DELAY_MS = 700; // kept short on purpose: Ratio Dash is a race (PAIR_COMPLETE_HOLD_MS is for the dueling modes)
 const DASH_END_RESULTS_DELAY_MS = 2200; // lets the winner's final glide play before results cover the track
 const DASH_TRACK_VIEWPORT_SHARE = 0.3; // the track's budget, as a share of viewport height...
 const DASH_TRACK_MIN_PX = 120;         // ...clamped to this range
