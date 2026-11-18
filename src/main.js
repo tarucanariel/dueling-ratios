@@ -68,7 +68,7 @@ const state = {
   myStats: null, // full per-mode stats object for the signed-in account, cached so renderMyStatsBadges() can compute "up next" progress bars without re-threading stats through every call site — see openMyStats()/loadMyBadges()/recordMyStats()
   myEquippedEffect: 'classic', // which TILE_EFFECTS entry the signed-in account has equipped — see activeTileEffectId()
   teacherAllowlist: new Set(), // lowercased emails admin-granted teacher status outside TEACHER_EMAIL_DOMAIN — see loadTeacherAllowlist()/isTeacherAccount()
-  homeVisible: true, // admin-controlled: whether the Home FAB is shown at all — see watchHomeVisibility() below and updateFabVisibility()
+  homeVisible: false, // admin-controlled: whether the Home FAB is shown at all — see watchHomeVisibility() below and updateFabVisibility(). Starts false so the FAB stays hidden until the database answers; starting true flashed it on screen for visitors while the admin had it switched off.
 
   // "Find Opponent" lobby (browsing waiting rooms instead of typing a code)
   unsubscribeLobby: null,
