@@ -1943,10 +1943,10 @@ body{
 
 .inline-op{
   font-family:'JetBrains Mono', monospace;
-  font-size:1.1rem;
+  font-size:1.4rem;
   font-weight:700;
-  color:#cccccc;
-  padding:0 2px;
+  color:#e6e6e6;
+  padding:0 4px;
 }
 
 .fraction-product{
@@ -2894,7 +2894,7 @@ body{
   .player-chip{ min-width:80px; padding:8px 12px; }
   .cross-row{ gap:5px; }
   .row-numerator, .row-denominator{ gap:4px; }
-  .inline-op{ font-size:0.85rem; padding:0; }
+  .inline-op{ font-size:1.05rem; padding:0 1px; }
 
   .corner-fab{ width:42px; height:42px; font-size:1.15rem; }
   .home-fab{ right:14px; top:14px; }
@@ -2921,7 +2921,7 @@ body{
   .cell-slot{ width:34px; height:34px; font-size:0.85rem; }
   .cross-row{ gap:4px; }
   .row-numerator, .row-denominator{ gap:3px; }
-  .inline-op{ font-size:0.75rem; padding:0; }
+  .inline-op{ font-size:0.95rem; padding:0; }
   .row-equals{ font-size:1.15rem; }
 }
 
