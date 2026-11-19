@@ -1899,13 +1899,27 @@ body{
   gap:6px;
 }
 
+/* Step directions are set in Computer Modern (TeX's typeface) italic, in
+   sentence case, so they read like the text of a math textbook. The font
+   files are bundled in public/fonts (not a CDN) so they also load on
+   school networks that block outside font hosts. */
+@font-face{
+  font-family:'CMU Serif';
+  src:url('/fonts/cmunti.woff') format('woff');
+  font-weight:400;
+  font-style:italic;
+  font-display:swap;
+}
+
 .row-caption{
-  font-family:'Inter', sans-serif;
-  font-weight:700;
-  font-size:0.8rem;
-  text-transform:uppercase;
-  letter-spacing:0.05em;
-  color:#00d2ff;
+  font-family:'CMU Serif', 'Latin Modern Roman', 'Source Serif 4', Georgia, serif;
+  font-style:italic;
+  font-weight:400;
+  font-size:1.05rem;
+  line-height:1.25;
+  letter-spacing:0.01em;
+  color:#7fe6ff;
+  text-align:center;
 }
 
 .cross-row{
@@ -2907,16 +2921,20 @@ body{
    down between the board and the pool; if there are more tiles than fit,
    the small tray itself scrolls internally instead.
 
-   The column here is single-file (one tile per row) rather than two —
-   that lets tiles be bigger while the column's total footprint stays
-   narrow, freeing up width the busiest (LCD/cross-multiply) board needs
-   to avoid wrapping its numerator row. The "=" sign was still at full
-   desktop size before this — quietly eating width — so it's shrunk here too. */
+   The column here is two tiles wide, like desktop. A pool holds up to 16
+   tiles, and a single-file column of them (~830px tall) always overflowed
+   a phone screen, so players had to scroll the tray to find the answer —
+   costly under a time control. Two columns of 38px tiles is 8 rows
+   (~350px), which fits on basically every phone. The extra column width
+   is paid for by slightly smaller slots/gaps on the board, so the busiest
+   (LCD/cross-multiply) board still doesn't wrap its numerator row. The
+   "=" sign is shrunk here too so it doesn't quietly eat width. */
 @media (max-width: 430px){
   body{ padding:8px; }
-  .board-area{ padding:12px 8px; gap:6px; }
-  .pool-sidebar{ flex:0 0 50px; gap:8px; }
-  .tile-btn{ width:44px; height:44px; font-size:0.95rem; }
+  .board-area{ padding:12px 6px; gap:6px; }
+  .pool-sidebar{ flex:0 0 86px; gap:8px; } /* 2×38px tiles + 6px gap + the tray's 2px padding each side */
+  .pool-tray{ gap:6px; }
+  .tile-btn{ width:38px; height:38px; font-size:0.85rem; }
 
   .cell-slot{ width:34px; height:34px; font-size:0.85rem; }
   .cross-row{ gap:4px; }
