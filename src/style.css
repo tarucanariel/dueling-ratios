@@ -1861,8 +1861,14 @@ body{
   min-width:0;
 }
 
+/* The sidebar sizes itself to the tray (width:min-content) rather than a
+   fixed width, so the 2-column tile grid always fits even when an effect
+   theme pads the tray (14px each side) or a desktop browser draws a
+   classic scrollbar inside it. min-width keeps the old footprint. */
 .pool-sidebar{
-  flex:0 0 96px;
+  flex:0 0 auto;
+  width:min-content;
+  min-width:96px;
   display:flex;
   flex-direction:column;
   align-items:center;
@@ -2094,11 +2100,11 @@ body{
 }
 
 .pool-tray{
-  display:flex;
-  flex-wrap:wrap;
+  display:grid;
+  grid-template-columns:repeat(2, max-content); /* always two tiles per row */
   gap:8px;
   justify-content:center;
-  align-content:flex-start;
+  align-content:start;
   max-height:60vh;
   overflow-y:auto;
   padding:2px;
@@ -2932,7 +2938,7 @@ body{
 @media (max-width: 430px){
   body{ padding:8px; }
   .board-area{ padding:12px 6px; gap:6px; }
-  .pool-sidebar{ flex:0 0 86px; gap:8px; } /* 2×38px tiles + 6px gap + the tray's 2px padding each side */
+  .pool-sidebar{ min-width:86px; gap:8px; } /* 2×38px tiles + 6px gap + the tray's 2px padding each side */
   .pool-tray{ gap:6px; }
   .tile-btn{ width:38px; height:38px; font-size:0.85rem; }
 
