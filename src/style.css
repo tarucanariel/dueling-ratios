@@ -2693,11 +2693,16 @@ body{
    makes z-index:-1 land above that background but below the strip and
    tray). ::before is the slowly rotating accretion ring, ::after the
    dark core with a thin bright rim. Overflow is clipped to the board's
-   rounded corners. */
+   rounded corners — with overflow:clip, not hidden: overflow:hidden
+   makes .board-area a scroll container, which silently breaks the
+   pool sidebar's position:sticky (on a long solution the pool scrolled
+   off the top of the page). clip paints the same but isn't a scroll
+   container; old browsers without clip fall back to hidden. */
 .effect-theme-domain-expansion .board-area{
   position:relative;
   isolation:isolate;
   overflow:hidden;
+  overflow:clip;
 }
 
 .effect-theme-domain-expansion .board-area::before{
