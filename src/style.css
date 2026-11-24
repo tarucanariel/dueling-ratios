@@ -2952,6 +2952,14 @@ body{
   .row-numerator, .row-denominator{ gap:3px; }
   .inline-op{ font-size:0.95rem; padding:0; }
   .row-equals{ font-size:1.15rem; }
+
+  /* Every board effect theme pads the problem strip and pool tray 14px
+     each side. That's 56px of a phone's width, enough to wrap the LCD
+     numerator row so its last box drops to a new line. Keep the themed
+     glow and border but trim the inner padding, mostly horizontally.
+     Same specificity as the theme rules, and later in the file, so it wins. */
+  [class*="effect-theme-"] .problem-strip,
+  [class*="effect-theme-"] .pool-tray{ padding:8px 4px; }
 }
 
 /* Short viewports (landscape phones, small laptops) need compression
